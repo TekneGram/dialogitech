@@ -6,11 +6,13 @@ from typing import Literal
 
 VariantKind = Literal["original", "rewrite", "hyde"]
 RetrievalKind = Literal["hybrid", "fts", "vector"]
+RetrievalMode = Literal["full", "fts_only", "hybrid_only", "fts_hybrid"]
 
 
 @dataclass(slots=True)
 class QueryRequest:
     query: str
+    retrieval_mode: RetrievalMode = "full"
     retrieval_depth: int = 10
     final_top_k: int = 15
     batch_size: int = 5

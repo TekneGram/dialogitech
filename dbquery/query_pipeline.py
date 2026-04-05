@@ -4,7 +4,7 @@ from .chunk_batcher import ChunkBatcher
 from .gemma_summarizer import GemmaBatchSummarizer
 from .hyde_generator import GemmaHyDEGenerator
 from .lancedb_retriever import LanceDBRetriever
-from .models import QueryPipelineResult, QueryRequest, SearchVariant
+from .models import QueryPipelineResult, QueryRequest, RetrievalMode, SearchVariant
 from .query_embedder import QueryEmbedder
 from .query_rewriter import GemmaQueryRewriter
 from .result_fuser import ReciprocalRankFuser
@@ -34,9 +34,20 @@ class QueryPipeline:
         self.synthesis_summarizer = synthesis_summarizer
 
     def run(self, request: QueryRequest) -> QueryPipelineResult:
-        rewrites = self.query_rewriter.rewrite(request.query, rewrite_count=request.rewrite_count)
-        hyde_text = self.hyde_generator.generate(request.query) if request.include_hyde else None
-        variants = self._build_variants(query=request.query, rewrites=rewrites, hyde_text=hyde_text)
+        rewrites: list[str] = []
+        if self._should_generate_rewrites(request.retrieval_mode):
+            rewrites = self.query_rewriter.rewrite(request.query, rewrite_count=request.rewrite_count)
+
+        hyde_text = None
+        if self._should_generate_hyde(request.retrieval_mode, request.include_hyde):
+            hyde_text = self.hyde_generator.generate(request.query)
+
+        variants = self._build_variants(
+            query=request.query,
+            rewrites=rewrites,
+            hyde_text=hyde_text,
+            retrieval_mode=request.retrieval_mode,
+        )
 
         embedded_variants = self.query_embedder.embed_variants(
             [variant for variant in variants if variant.retrieval_kind in {"hybrid", "vector"}]
@@ -81,21 +92,38 @@ class QueryPipeline:
             synthesized_summary=synthesized_summary,
         )
 
-    def _build_variants(self, *, query: str, rewrites: list[str], hyde_text: str | None) -> list[SearchVariant]:
-        variants = [
-            SearchVariant(
-                key="original_hybrid",
-                text=query,
-                kind="original",
-                retrieval_kind="hybrid",
-            ),
-            SearchVariant(
-                key="original_fts",
-                text=query,
-                kind="original",
-                retrieval_kind="fts",
-            ),
-        ]
+    def _build_variants(
+        self,
+        *,
+        query: str,
+        rewrites: list[str],
+        hyde_text: str | None,
+        retrieval_mode: RetrievalMode,
+    ) -> list[SearchVariant]:
+        variants: list[SearchVariant] = []
+
+        if retrieval_mode in {"full", "hybrid_only", "fts_hybrid"}:
+            variants.append(
+                SearchVariant(
+                    key="original_hybrid",
+                    text=query,
+                    kind="original",
+                    retrieval_kind="hybrid",
+                )
+            )
+        if retrieval_mode in {"full", "fts_only", "fts_hybrid"}:
+            variants.append(
+                SearchVariant(
+                    key="original_fts",
+                    text=query,
+                    kind="original",
+                    retrieval_kind="fts",
+                )
+            )
+
+        if retrieval_mode != "full":
+            return variants
+
         for index, rewrite in enumerate(rewrites, start=1):
             variants.append(
                 SearchVariant(
@@ -115,3 +143,9 @@ class QueryPipeline:
                 )
             )
         return variants
+
+    def _should_generate_rewrites(self, retrieval_mode: RetrievalMode) -> bool:
+        return retrieval_mode == "full"
+
+    def _should_generate_hyde(self, retrieval_mode: RetrievalMode, include_hyde: bool) -> bool:
+        return retrieval_mode == "full" and include_hyde
