@@ -17,6 +17,7 @@ class QueryOutputWriter:
         lines.append("# Query Output")
         lines.append("")
         lines.append(f"Query: {result.request.query}")
+        lines.append(f"Retrieval mode: {result.request.retrieval_mode}")
         lines.append(f"Rewrites: {', '.join(result.rewrites)}")
         lines.append(f"HyDE enabled: {'yes' if result.hyde_text is not None else 'no'}")
         if result.hyde_text is not None:

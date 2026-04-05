@@ -29,6 +29,12 @@ def main() -> None:
     parser.add_argument("query", help="User query.")
     parser.add_argument("--db-path", required=True, help="Path to the LanceDB database directory.")
     parser.add_argument("--table-name", default=DEFAULT_TABLE_NAME, help="Name of the LanceDB table.")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("full", "fts_only", "hybrid_only", "fts_hybrid"),
+        default="full",
+        help="Select which retrieval branches to run.",
+    )
     parser.add_argument("--model-path", default=DEFAULT_GEMMA_MODEL, help="Gemma model path.")
     parser.add_argument(
         "--python-executable",
@@ -70,6 +76,7 @@ def main() -> None:
     result = pipeline.run(
         QueryRequest(
             query=args.query,
+            retrieval_mode=args.retrieval_mode,
             retrieval_depth=args.retrieval_depth,
             final_top_k=args.final_top_k,
             batch_size=args.batch_size,
@@ -86,6 +93,7 @@ def main() -> None:
         output_path = QueryOutputWriter().write(result, args.output_path)
 
     print(f"query={result.request.query}")
+    print(f"retrieval_mode={result.request.retrieval_mode}")
     print(f"rewrites={result.rewrites}")
     print(f"hyde_present={result.hyde_text is not None}")
     if result.hyde_text is not None:

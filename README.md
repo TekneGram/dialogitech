@@ -298,6 +298,7 @@ The output artifact written by `--output-path` contains:
 
 Useful query flags:
 
+- `--retrieval-mode`: retrieval branch selection. Available modes are `full`, `fts_only`, `hybrid_only`, and `fts_hybrid`
 - `--retrieval-depth`: number of results to keep from each retrieval branch before fusion
 - `--final-top-k`: number of fused ranked chunks to keep after dedupe and RRF
 - `--batch-size`: number of chunks to summarize per batch
@@ -306,6 +307,13 @@ Useful query flags:
 - `--min-rrf-lists`: minimum number of retrieval lists that must contain a chunk before it can survive fusion
 - `--min-relevance-score`: optional LanceDB relevance-score cutoff where applicable
 - `--no-hyde`: disable the HyDE retrieval branch
+
+Retrieval mode guidance:
+
+- `full`: run the complete pipeline with hybrid, FTS, rewrites, and HyDE. This is the default and is best for broad conceptual questions.
+- `fts_only`: run only original-query full-text search. Use this for very specific terms, acronyms, variable names, or exact phrases.
+- `hybrid_only`: run only original-query hybrid retrieval. Use this when you want semantic plus lexical retrieval without rewrites or HyDE.
+- `fts_hybrid`: run original-query FTS and original-query hybrid only. Use this for focused questions where exact wording matters, but semantic backup is still useful.
 
 Example with explicit tuning:
 
@@ -317,6 +325,16 @@ Example with explicit tuning:
   --retrieval-depth 12 \
   --final-top-k 10 \
   --batch-size 5
+```
+
+Example for an exact-term lookup:
+
+```bash
+./.venv/bin/python -m dbquery.run_query \
+  "What is vpersent?" \
+  --db-path data/lancedb \
+  --retrieval-mode fts_only \
+  --output-path outputs/vpersent_query.md
 ```
 
 Operational note:
