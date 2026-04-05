@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import re
+
 from .models import FusedChunkResult, SummaryBatch
 
 
 class CitationFormatter:
     def citation_label(self, chunk: FusedChunkResult) -> str:
         authors = chunk.authors
-        year = str(chunk.year) if chunk.year is not None else "n.d."
+        year = self._citation_year(chunk)
         if not authors:
-            author_label = chunk.paper_id
+            author_label = self._fallback_author_label(chunk.paper_id)
         elif len(authors) == 1:
             author_label = self._surname(authors[0])
         else:
@@ -38,3 +40,18 @@ class CitationFormatter:
         if not parts:
             return author_name
         return parts[-1]
+
+    def _fallback_author_label(self, paper_id: str) -> str:
+        suffix = paper_id
+        if "_" in paper_id:
+            suffix = paper_id.split("_", 1)[1]
+        suffix = suffix.replace("-", " ").replace("_", " ").strip()
+        return suffix or paper_id
+
+    def _citation_year(self, chunk: FusedChunkResult) -> str:
+        if chunk.year is not None:
+            return str(chunk.year)
+        match = re.match(r"^(\d{4})[_-]", chunk.paper_id)
+        if match is not None:
+            return match.group(1)
+        return "n.d."

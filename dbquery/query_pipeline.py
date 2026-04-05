@@ -8,6 +8,7 @@ from .models import QueryPipelineResult, QueryRequest, SearchVariant
 from .query_embedder import QueryEmbedder
 from .query_rewriter import GemmaQueryRewriter
 from .result_fuser import ReciprocalRankFuser
+from .synthesis_summarizer import GemmaSynthesisSummarizer
 
 
 class QueryPipeline:
@@ -21,6 +22,7 @@ class QueryPipeline:
         result_fuser: ReciprocalRankFuser,
         chunk_batcher: ChunkBatcher,
         summarizer: GemmaBatchSummarizer,
+        synthesis_summarizer: GemmaSynthesisSummarizer | None = None,
     ) -> None:
         self.query_rewriter = query_rewriter
         self.hyde_generator = hyde_generator
@@ -29,6 +31,7 @@ class QueryPipeline:
         self.result_fuser = result_fuser
         self.chunk_batcher = chunk_batcher
         self.summarizer = summarizer
+        self.synthesis_summarizer = synthesis_summarizer
 
     def run(self, request: QueryRequest) -> QueryPipelineResult:
         rewrites = self.query_rewriter.rewrite(request.query, rewrite_count=request.rewrite_count)
@@ -59,6 +62,12 @@ class QueryPipeline:
             self.summarizer.summarize_batch(batch, question=request.query)
             for batch in summary_batches
         ]
+        synthesized_summary = None
+        if self.synthesis_summarizer is not None:
+            synthesized_summary = self.synthesis_summarizer.synthesize(
+                summaries,
+                question=request.query,
+            )
 
         return QueryPipelineResult(
             request=request,
@@ -69,6 +78,7 @@ class QueryPipeline:
             fused_results=fused_results,
             summary_batches=summary_batches,
             summaries=summaries,
+            synthesized_summary=synthesized_summary,
         )
 
     def _build_variants(self, *, query: str, rewrites: list[str], hyde_text: str | None) -> list[SearchVariant]:
