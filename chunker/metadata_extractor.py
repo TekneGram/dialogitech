@@ -30,7 +30,20 @@ class MetadataExtractor:
         "laboratory",
         "lab",
         "hospital",
+        "tech",
+        "research",
+        "academy",
+        "sciences",
+        "engineering",
+        "laboratories",
     }
+    AUTHOR_MARKER_PATTERN = re.compile(
+        r"(?:\^\{[^}]+\}|\[[^\]]+\]|[\*†‡§¶‖]+|\b\d+\b(?=\s*[A-Z]))"
+    )
+    NUMBERED_SECTION_HEADING_PATTERN = re.compile(r"^\d+(?:\.\d+)*\s+[A-Z]")
+    PERSON_NAME_PATTERN = re.compile(
+        r"^[A-Z][A-Za-z'`\-]+(?:\s+[A-Z](?:\.)?)?(?:\s+[A-Z][A-Za-z'`\-]+){0,3}$"
+    )
     REFERENCE_AUTHOR_START = re.compile(
         r"^(?:-+\s*)?(?:[A-Z][A-Za-z'`\-]+,\s+(?:[A-Z]\.\s*)+)(?:,\s*&\s*[A-Z][A-Za-z'`\-]+,\s+(?:[A-Z]\.\s*)+)?"
     )
@@ -44,7 +57,9 @@ class MetadataExtractor:
         if isinstance(source, dict):
             return source
         path = Path(source)
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.setdefault("__source_path__", str(path))
+        return payload
 
     def extract_all(self, source: str | Path | dict[str, Any]) -> dict[str, Any]:
         document = self.load_json(source)
@@ -86,19 +101,19 @@ class MetadataExtractor:
 
         journal_name = None
         page0_blocks = self._page_blocks(document, 0)
+        title = self.extract_title(document)
         for block in page0_blocks:
             if block.get("block_type") != "SectionHeader":
                 continue
             text = self._clean_text(self._html_to_text(block.get("html", "")))
-            normalized = self._normalize_title(text)
-            if normalized and normalized not in self.EXCLUDED_FRONT_MATTER_HEADINGS:
-                if normalized != self._normalize_title(self.extract_title(document) or ""):
-                    journal_name = text
-                    break
+            if not self._looks_like_journal_candidate(text, title=title):
+                continue
+            journal_name = text
+            break
 
         volume = self._first_group(self.VOLUME_PATTERN, front_text)
         issue = self._first_group(self.ISSUE_PATTERN, front_text)
-        year = self._first_group(self.YEAR_PATTERN, front_text, group=0)
+        year = self._extract_year(front_text, document)
         doi = self._first_group(self.DOI_PATTERN, front_text, group=0)
         issn = self._first_group(self.ISSN_PATTERN, front_text)
 
@@ -116,33 +131,16 @@ class MetadataExtractor:
         if title is None:
             return []
 
-        page0_blocks = self._page_blocks(document, 0)
-        title_seen = False
         authors: list[str] = []
-
-        for block in page0_blocks:
-            block_type = block.get("block_type")
+        for block in self._candidate_front_matter_blocks(document, title):
             text = self._clean_text(self._html_to_text(block.get("html", "")))
-            if not text:
+            if not text or self._looks_like_boilerplate_front_matter(text):
                 continue
-
-            if block_type == "SectionHeader":
-                if self._normalize_title(text) == self._normalize_title(title):
-                    title_seen = True
-                    continue
-                if self._normalize_title(text) == "abstract":
-                    break
+            cleaned_text = self._strip_author_markers(text)
+            author_segment, _ = self._split_mixed_author_affiliation_block(cleaned_text)
+            if not author_segment:
                 continue
-
-            if not title_seen:
-                continue
-
-            if self._looks_like_affiliation(text):
-                continue
-            if self._looks_like_boilerplate_front_matter(text):
-                continue
-            if self._looks_like_author_line(text):
-                authors.extend(self._split_authors(text))
+            authors.extend(self._extract_author_candidates_from_text(author_segment))
 
         return self._dedupe_preserve_order(authors)
 
@@ -250,6 +248,164 @@ class MetadataExtractor:
     def _split_authors(self, text: str) -> list[str]:
         parts = re.split(r"\s+(?:and|&)\s+|,\s*(?=[A-Z][a-z])", text)
         return [part.strip() for part in parts if part.strip()]
+
+    def _candidate_front_matter_blocks(
+        self,
+        document: dict[str, Any],
+        title: str,
+    ) -> list[dict[str, Any]]:
+        page0_blocks = self._page_blocks(document, 0)
+        title_seen = False
+        candidates: list[dict[str, Any]] = []
+
+        for block in page0_blocks:
+            block_type = block.get("block_type")
+            text = self._clean_text(self._html_to_text(block.get("html", "")))
+            if not text:
+                continue
+
+            if block_type == "SectionHeader":
+                normalized = self._normalize_title(text)
+                if normalized == self._normalize_title(title):
+                    title_seen = True
+                    continue
+                if normalized == "abstract":
+                    break
+                if title_seen:
+                    continue
+
+            if title_seen:
+                candidates.append(block)
+
+        return candidates
+
+    def _strip_author_markers(self, text: str) -> str:
+        text = self.AUTHOR_MARKER_PATTERN.sub(" ", text)
+        text = re.sub(r"\s*[,;:/]\s*", ", ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip(" ,")
+
+    def _split_mixed_author_affiliation_block(self, text: str) -> tuple[str, str | None]:
+        normalized_text = self._clean_text(text)
+        if not normalized_text:
+            return "", None
+        if not self._looks_like_affiliation(normalized_text):
+            return normalized_text, None
+
+        tokens = normalized_text.split()
+        for index, token in enumerate(tokens):
+            if self._looks_like_affiliation(token):
+                prefix = " ".join(tokens[:index]).strip(" ,;")
+                suffix = " ".join(tokens[index:]).strip(" ,;")
+                return prefix, suffix or None
+
+        for match in re.finditer(r"[,;]", normalized_text):
+            prefix = normalized_text[: match.start()].strip(" ,;")
+            suffix = normalized_text[match.end() :].strip(" ,;")
+            if prefix and suffix and self._looks_like_affiliation(suffix):
+                return prefix, suffix
+
+        return "", normalized_text
+
+    def _extract_author_candidates_from_text(self, text: str) -> list[str]:
+        if not text:
+            return []
+        if self._looks_like_author_line(text):
+            return [candidate for candidate in self._split_authors(text) if self._looks_like_person_name(candidate)]
+
+        normalized = text.replace(" and ", ", ").replace(" & ", ", ")
+        raw_parts = [part.strip(" ,;") for part in normalized.split(",") if part.strip(" ,;")]
+        if len(raw_parts) > 1:
+            return [part for part in raw_parts if self._looks_like_person_name(part)]
+
+        name_pattern = re.compile(
+            r"[A-Z][A-Za-z'`\-]+(?:\s+[A-Z](?:\.)?)?(?:\s+[A-Z][A-Za-z'`\-]+)+"
+        )
+        candidates = [match.group(0).strip() for match in name_pattern.finditer(text)]
+        filtered_candidates = [candidate for candidate in candidates if self._looks_like_person_name(candidate)]
+        if filtered_candidates:
+            return filtered_candidates
+        return self._extract_sequential_author_names(text)
+
+    def _looks_like_person_name(self, text: str) -> bool:
+        cleaned = self._clean_text(text).strip(" ,;")
+        if not cleaned:
+            return False
+        if len(cleaned.split()) < 2 or len(cleaned.split()) > 4:
+            return False
+        if self._looks_like_affiliation(cleaned):
+            return False
+        if self._looks_like_numbered_section_heading(cleaned):
+            return False
+        return bool(self.PERSON_NAME_PATTERN.match(cleaned))
+
+    def _looks_like_numbered_section_heading(self, text: str) -> bool:
+        return bool(self.NUMBERED_SECTION_HEADING_PATTERN.match(text.strip()))
+
+    def _looks_like_journal_candidate(self, text: str, *, title: str | None) -> bool:
+        normalized = self._normalize_title(text)
+        if not normalized:
+            return False
+        if title is not None and normalized == self._normalize_title(title):
+            return False
+        if normalized in self.EXCLUDED_FRONT_MATTER_HEADINGS:
+            return False
+        if self._looks_like_numbered_section_heading(text):
+            return False
+        if re.search(r"\b(?:introduction|methods?|results?|discussion|conclusion|references)\b", normalized):
+            return False
+        return True
+
+    def _extract_year(self, front_text: str, document: dict[str, Any]) -> str | None:
+        year = self._first_group(self.YEAR_PATTERN, front_text, group=0)
+        if year:
+            return year
+        return self._extract_year_from_document(document)
+
+    def _extract_year_from_document(self, document: dict[str, Any]) -> str | None:
+        source_path = str(document.get("__source_path__", ""))
+        year = self._extract_year_from_identifier(source_path)
+        if year:
+            return year
+        first_page_blocks = self._page_blocks(document, 0)
+        for block in first_page_blocks:
+            block_id = str(block.get("id", ""))
+            year = self._extract_year_from_identifier(block_id)
+            if year:
+                return year
+        document_id = str(document.get("id", ""))
+        return self._extract_year_from_identifier(document_id)
+
+    def _extract_year_from_identifier(self, identifier: str) -> str | None:
+        match = re.search(r"\b((?:19|20)\d{2})[_-][A-Za-z]", identifier)
+        if match:
+            return match.group(1)
+        path_match = re.search(r"/((?:19|20)\d{2})_[^/]+", identifier)
+        if path_match:
+            return path_match.group(1)
+        return None
+
+    def _extract_sequential_author_names(self, text: str) -> list[str]:
+        tokens = [token.strip(" ,;") for token in text.split() if token.strip(" ,;")]
+        names: list[str] = []
+        current: list[str] = []
+
+        for token in tokens:
+            candidate_text = " ".join(current + [token]).strip()
+            if self._looks_like_affiliation(candidate_text):
+                break
+            if not re.match(r"^[A-Z][A-Za-z'`\-]*\.?$", token):
+                if current:
+                    current = []
+                continue
+            current.append(token)
+            if len(current) >= 2 and self._looks_like_person_name(" ".join(current)):
+                names.append(" ".join(current))
+                current = []
+            elif len(current) >= 4:
+                current = []
+
+        return names
 
     def _looks_like_reference_entry(self, text: str) -> bool:
         first_line = text.splitlines()[0].strip()

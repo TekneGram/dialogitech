@@ -61,6 +61,7 @@ class QueryPipeline:
                     vector=embedded_variants.get(variant.key),
                     limit=request.retrieval_depth,
                     min_relevance_score=request.min_relevance_score,
+                    filters=request.filters,
                 )
             )
 
