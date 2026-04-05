@@ -6,18 +6,20 @@ from .markdown_section_chunker import (
     MarkdownSectionChunker,
     SectionChunk,
 )
-from .section_classifier import (
+from .llm_section_classifier import (
     ArticleQuintile,
-    ChunkClassification,
-    ChunkClassificationEnricher,
-    ChunkClassificationLLM,
     ChunkContext,
     ChunkLocation,
+    ChunkClassificationLLM,
+    ClassificationConfidence,
+    article_quintile,
+)
+from .section_classifier import (
+    ChunkClassification,
+    ChunkClassificationEnricher,
     ClassifiedHeadingSplit,
     ClassifiedSectionChunk,
-    ClassificationConfidence,
     DeterministicSectionClassifier,
-    article_quintile,
     classify_filtered_markdown,
 )
 

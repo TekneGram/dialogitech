@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .section_classifier import ChunkClassificationLLM, classify_filtered_markdown
+from .llm_section_classifier import ChunkClassificationLLM
+from .section_classifier import classify_filtered_markdown
 
 
 def main() -> None:
