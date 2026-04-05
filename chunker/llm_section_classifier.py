@@ -5,7 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from .markdown_section_chunker import HeadingSplit, SectionChunk
 
@@ -18,7 +18,7 @@ LLMAction = Literal["classify", "request_context"]
 @dataclass(slots=True)
 class ChunkClassification:
     label: SectionLabel | None
-    source: Literal["llm"]
+    source: Literal["llm", "deterministic"]
     reason: str
     confidence: ClassificationConfidence | None = None
     used_context: bool = False
@@ -102,6 +102,7 @@ or
         max_tokens: int | None = None,
         temperature: float = 0.0,
         python_executable: str | Path | None = None,
+        event_logger: Callable[[str], None] | None = None,
     ) -> None:
         self.filtered_markdown = filtered_markdown
         self.heading_splits = heading_splits
@@ -109,51 +110,113 @@ or
         self.max_tokens = max_tokens or self.MODEL_MAX_TOKENS
         self.temperature = temperature
         self.python_executable = str(python_executable) if python_executable is not None else None
+        self.event_logger = event_logger
         self._model: Any = None
         self._tokenizer: Any = None
         self._section_ranges = self._build_section_ranges(filtered_markdown, heading_splits)
         self._chunk_locations = self._build_chunk_locations(filtered_markdown, heading_splits, self._section_ranges)
 
     def classify(self, chunk: SectionChunk, heading_split: HeadingSplit) -> ChunkClassification:
-        chunk_location = self._chunk_location(chunk, heading_split)
-        initial_prompt = self._initial_user_prompt(chunk, heading_split, chunk_location)
-        initial_response = self._generate(
-            messages=[
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": initial_prompt},
-            ]
-        )
-        initial_decision = self._parse_decision(initial_response, allow_request_context=True)
+        return self.classify_with_previous_label(chunk=chunk, heading_split=heading_split, previous_label=None)
 
-        if initial_decision.action == "request_context":
-            context = self._context_for_chunk(chunk, heading_split)
-            context_prompt = self._context_user_prompt(chunk, heading_split, chunk_location, context)
-            final_response = self._generate(
+    def classify_with_previous_label(
+        self,
+        *,
+        chunk: SectionChunk,
+        heading_split: HeadingSplit,
+        previous_label: SectionLabel | None,
+    ) -> ChunkClassification:
+        chunk_location = self._chunk_location(chunk, heading_split)
+        chunk_ref = self._chunk_ref(chunk=chunk, heading_split=heading_split)
+        initial_prompt = self._initial_user_prompt(chunk, heading_split, chunk_location)
+        used_context = False
+
+        try:
+            self._log_event(
+                f"{chunk_ref} sending initial classification request to Gemma 4 "
+                f"(position={chunk_location.quintile})."
+            )
+            initial_response = self._generate(
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": initial_prompt},
-                    {"role": "assistant", "content": initial_response},
-                    {"role": "user", "content": context_prompt},
                 ]
             )
-            final_decision = self._parse_decision(final_response, allow_request_context=False)
+            self._log_event(
+                f"{chunk_ref} received initial response: {self._truncate_for_log(initial_response)}"
+            )
+            initial_decision = self._parse_decision(initial_response, allow_request_context=True)
+
+            if initial_decision.action == "request_context":
+                used_context = True
+                context = self._context_for_chunk(chunk, heading_split)
+                context_prompt = self._context_user_prompt(chunk, heading_split, chunk_location, context)
+                self._log_event(f"{chunk_ref} requested context; sending one context round.")
+                final_response = self._generate(
+                    messages=[
+                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {"role": "user", "content": initial_prompt},
+                        {"role": "assistant", "content": initial_response},
+                        {"role": "user", "content": context_prompt},
+                    ]
+                )
+                self._log_event(
+                    f"{chunk_ref} received final response after context: "
+                    f"{self._truncate_for_log(final_response)}"
+                )
+                final_decision = self._parse_decision(final_response, allow_request_context=True)
+                if final_decision.action == "request_context":
+                    if previous_label is None:
+                        raise RuntimeError("Model requested context after the single allowed retrieval round.")
+                    confirmation_prompt = self._previous_label_confirmation_prompt(
+                        chunk=chunk,
+                        heading_split=heading_split,
+                        chunk_location=chunk_location,
+                        previous_label=previous_label,
+                    )
+                    self._log_event(
+                        f"{chunk_ref} requested context again; sending previous-label confirmation "
+                        f"prompt with prior label={previous_label}."
+                    )
+                    confirmation_response = self._generate(
+                        messages=[
+                            {"role": "system", "content": self.SYSTEM_PROMPT},
+                            {"role": "user", "content": initial_prompt},
+                            {"role": "assistant", "content": initial_response},
+                            {"role": "user", "content": context_prompt},
+                            {"role": "assistant", "content": final_response},
+                            {"role": "user", "content": confirmation_prompt},
+                        ]
+                    )
+                    self._log_event(
+                        f"{chunk_ref} received previous-label confirmation response: "
+                        f"{self._truncate_for_log(confirmation_response)}"
+                    )
+                    final_decision = self._parse_decision(confirmation_response, allow_request_context=False)
+                return ChunkClassification(
+                    label=final_decision.label,
+                    source="llm",
+                    reason=final_decision.reason,
+                    confidence=final_decision.confidence,
+                    used_context=True,
+                    needs_llm=False,
+                )
+
             return ChunkClassification(
-                label=final_decision.label,
+                label=initial_decision.label,
                 source="llm",
-                reason=final_decision.reason,
-                confidence=final_decision.confidence,
-                used_context=True,
+                reason=initial_decision.reason,
+                confidence=initial_decision.confidence,
+                used_context=False,
                 needs_llm=False,
             )
-
-        return ChunkClassification(
-            label=initial_decision.label,
-            source="llm",
-            reason=initial_decision.reason,
-            confidence=initial_decision.confidence,
-            used_context=False,
-            needs_llm=False,
-        )
+        except RuntimeError as exc:
+            return self._fallback_to_previous_label(
+                chunk_ref=chunk_ref,
+                previous_label=previous_label,
+                used_context=used_context,
+                failure_reason=str(exc),
+            )
 
     def _initial_user_prompt(
         self,
@@ -194,6 +257,29 @@ or
                 "Next heading section:",
                 next_section,
                 "Return JSON only with action=classify.",
+            ]
+        )
+
+    def _previous_label_confirmation_prompt(
+        self,
+        *,
+        chunk: SectionChunk,
+        heading_split: HeadingSplit,
+        chunk_location: ChunkLocation,
+        previous_label: SectionLabel,
+    ) -> str:
+        return "\n".join(
+            [
+                "You must now return a final classification.",
+                f"Heading: {heading_split.title}",
+                f"Article position: {chunk_location.quintile}",
+                f"The previous chunk was classified as: {previous_label}",
+                "This chunk is very likely to have the same label unless the content clearly indicates otherwise.",
+                "Confirm the same label or override it with a different allowed label.",
+                "Do not request more context.",
+                "Return JSON only with action=classify.",
+                "Chunk:",
+                chunk.text,
             ]
         )
 
@@ -276,6 +362,47 @@ or
         rendered.append("ASSISTANT:")
         return "\n\n".join(rendered)
 
+    def _chunk_ref(self, *, chunk: SectionChunk, heading_split: HeadingSplit) -> str:
+        return f"[heading={heading_split.title!r} chunk={chunk.chunk_index}]"
+
+    def _log_event(self, message: str) -> None:
+        if self.event_logger is not None:
+            self.event_logger(message)
+
+    def _truncate_for_log(self, response: str, max_chars: int = 240) -> str:
+        collapsed = " ".join(response.split())
+        if len(collapsed) <= max_chars:
+            return collapsed
+        return f"{collapsed[: max_chars - 3]}..."
+
+    def _fallback_to_previous_label(
+        self,
+        *,
+        chunk_ref: str,
+        previous_label: SectionLabel | None,
+        used_context: bool,
+        failure_reason: str,
+    ) -> ChunkClassification:
+        if previous_label is None:
+            raise RuntimeError(failure_reason)
+
+        fallback_reason = (
+            f"LLM failed to provide a concrete label; inherited previous resolved label "
+            f"'{previous_label}'. Gemma failure: {failure_reason}"
+        )
+        self._log_event(
+            f"{chunk_ref} Gemma failed to classify chunk; using deterministic fallback "
+            f"with previous label={previous_label}. Failure: {failure_reason}"
+        )
+        return ChunkClassification(
+            label=previous_label,
+            source="deterministic",
+            reason=fallback_reason,
+            confidence="low",
+            used_context=used_context,
+            needs_llm=False,
+        )
+
     def _parse_decision(self, raw_response: str, allow_request_context: bool) -> LLMDecision:
         try:
             payload = self._parse_json_object(raw_response)
@@ -286,8 +413,9 @@ or
         label = self._normalize_optional_string(payload.get("label"))
         confidence = self._normalize_optional_string(payload.get("confidence"))
 
-        if action in self.LABELS and label is None:
-            label = action
+        if action in self.LABELS:
+            if label is None:
+                label = action
             action = "classify"
 
         if action not in {"classify", "request_context"}:
@@ -323,8 +451,54 @@ or
         except json.JSONDecodeError:
             match = self.JSON_PATTERN.search(raw_response)
             if not match:
-                raise ValueError("No JSON object found in model response.")
-            return json.loads(match.group(0))
+                return self._recover_json_like_payload(raw_response)
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return self._recover_json_like_payload(match.group(0))
+
+    def _recover_json_like_payload(self, raw_response: str) -> dict[str, Any]:
+        action = self._extract_json_string_field(raw_response, "action")
+        reason = self._extract_json_string_field(raw_response, "reason")
+        label = self._extract_json_string_field(raw_response, "label")
+        confidence = self._extract_json_string_field(raw_response, "confidence")
+
+        if action is None:
+            raise ValueError("Could not recover action field from model response.")
+
+        payload: dict[str, Any] = {"action": action}
+        if label is not None:
+            payload["label"] = label
+        if confidence is not None:
+            payload["confidence"] = confidence
+        if reason is not None:
+            payload["reason"] = reason
+        return payload
+
+    def _extract_json_string_field(self, raw_response: str, field_name: str) -> str | None:
+        field_token = f'"{field_name}"'
+        field_index = raw_response.find(field_token)
+        if field_index < 0:
+            return None
+
+        colon_index = raw_response.find(":", field_index + len(field_token))
+        if colon_index < 0:
+            return None
+
+        value_start = raw_response.find('"', colon_index)
+        if value_start < 0:
+            return None
+
+        scan_index = value_start + 1
+        while scan_index < len(raw_response):
+            char = raw_response[scan_index]
+            if char == '"' and raw_response[scan_index - 1] != "\\":
+                remainder = raw_response[scan_index + 1 :]
+                if re.match(r'\s*(?:,|\})', remainder):
+                    return raw_response[value_start + 1 : scan_index]
+            scan_index += 1
+
+        return raw_response[value_start + 1 :].rstrip().rstrip("}").strip()
 
     def _normalize_optional_string(self, value: Any) -> str | None:
         if value is None:

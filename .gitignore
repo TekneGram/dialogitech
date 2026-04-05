@@ -27,3 +27,4 @@ dist/
 # Local document and vendor/work folders
 marker/
 pdfs/
+data/

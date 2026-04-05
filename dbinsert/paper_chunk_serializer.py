@@ -28,8 +28,12 @@ class PaperChunkSerializer:
                         paper_title=paper_metadata.paper_title,
                         authors=list(paper_metadata.authors),
                         journal=paper_metadata.journal,
+                        volume=paper_metadata.volume,
+                        issue=paper_metadata.issue,
                         year=paper_metadata.year,
                         doi=paper_metadata.doi,
+                        issn=paper_metadata.issn,
+                        references=list(paper_metadata.references or []),
                         section_title=chunk.title,
                         heading_level=chunk.heading_level,
                         chunk_index=chunk.chunk_index,
@@ -41,6 +45,7 @@ class PaperChunkSerializer:
                         used_context=chunk.classification.used_context,
                         reason=chunk.classification.reason,
                         markdown_path=paper_metadata.markdown_path,
+                        marker_json_path=paper_metadata.marker_json_path,
                         pdf_path=paper_metadata.pdf_path,
                     )
                 )

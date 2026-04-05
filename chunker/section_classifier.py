@@ -187,7 +187,11 @@ class ChunkClassificationEnricher:
                 if self.force_llm:
                     if self.llm_classifier is None:
                         raise RuntimeError("force_llm=True requires an llm_classifier.")
-                    classification = self.llm_classifier.classify(chunk=chunk, heading_split=heading_split)
+                    classification = self.llm_classifier.classify_with_previous_label(
+                        chunk=chunk,
+                        heading_split=heading_split,
+                        previous_label=previous_resolved_label,
+                    )
                 else:
                     classification = self.deterministic_classifier.classify(
                         chunk=chunk,
@@ -196,7 +200,11 @@ class ChunkClassificationEnricher:
                         previous_label=previous_resolved_label,
                     )
                     if classification.needs_llm and self.llm_classifier is not None:
-                        classification = self.llm_classifier.classify(chunk=chunk, heading_split=heading_split)
+                        classification = self.llm_classifier.classify_with_previous_label(
+                            chunk=chunk,
+                            heading_split=heading_split,
+                            previous_label=previous_resolved_label,
+                        )
 
                 classified_chunks.append(
                     ClassifiedSectionChunk(

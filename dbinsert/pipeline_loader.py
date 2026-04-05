@@ -75,8 +75,12 @@ def build_paper_metadata(
     title: str | None = None
     authors: list[str] = []
     journal_name: str | None = None
+    volume: str | None = None
+    issue: str | None = None
     year: int | None = None
     doi: str | None = None
+    issn: str | None = None
+    references: list[str] = []
 
     if marker_json_path is not None:
         metadata = MetadataExtractor().extract_all(marker_json_path)
@@ -86,10 +90,14 @@ def build_paper_metadata(
         journal_payload = metadata.get("journal") or {}
         if isinstance(journal_payload, dict):
             journal_name = journal_payload.get("name")
+            volume = journal_payload.get("volume")
+            issue = journal_payload.get("issue")
             doi = journal_payload.get("doi")
+            issn = journal_payload.get("issn")
             raw_year = journal_payload.get("year")
             if isinstance(raw_year, str) and raw_year.isdigit():
                 year = int(raw_year)
+        references = list(metadata.get("references") or [])
 
     resolved_markdown_path = markdown_path or _source_markdown_from_classified_json(classified_json_path)
     resolved_paper_id = paper_id or _default_paper_id(classified_json_path, marker_json_path)
@@ -100,9 +108,14 @@ def build_paper_metadata(
         paper_title=resolved_title,
         authors=authors,
         journal=journal_name,
+        volume=volume,
+        issue=issue,
         year=year,
         doi=doi,
+        issn=issn,
+        references=references,
         markdown_path=resolved_markdown_path,
+        marker_json_path=str(marker_json_path) if marker_json_path is not None else None,
         pdf_path=pdf_path,
     )
 

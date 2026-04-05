@@ -28,8 +28,9 @@ class RenderedItem:
 
 
 class BoilerplateFilter:
+    REFERENCE_SECTION_TITLE = "references"
     EXCLUDED_SECTION_TITLES = {
-        "references",
+        REFERENCE_SECTION_TITLE,
         "acknowledgment",
         "acknowledgement",
         "declaration of use of ai",
@@ -89,6 +90,7 @@ class BoilerplateFilter:
     def __init__(self) -> None:
         self.removed_blocks: list[RemovedBlock] = []
         self._skip_section_active = False
+        self._drop_remaining_blocks = False
         self._metadata: dict[str, Any] = {}
         self._normalized_title_to_remove: str | None = None
         self._normalized_authors_to_remove: set[str] = set()
@@ -119,6 +121,7 @@ class BoilerplateFilter:
     ) -> str:
         self.removed_blocks = []
         self._skip_section_active = False
+        self._drop_remaining_blocks = False
         self._prepare_metadata(document, metadata)
         items: list[RenderedItem] = []
 
@@ -135,18 +138,26 @@ class BoilerplateFilter:
         suppress_heading_ids = self._find_title_page_heading_ids(blocks)
         items: list[RenderedItem] = []
         for block in blocks:
+            if self._drop_remaining_blocks:
+                self._record_removed(block, "after_references")
+                continue
+
             block_type = block.get("block_type", "")
             block_page_id = self._page_id_from_block_id(block.get("id", ""))
             if block_type == "SectionHeader":
                 heading_text = self._clean_text(self._html_to_text(block.get("html", "")))
+                normalized_heading = self._normalize_title(heading_text)
+                if normalized_heading == self.REFERENCE_SECTION_TITLE:
+                    self._drop_remaining_blocks = True
                 self._skip_section_active = self._is_excluded_section_title(heading_text)
                 if block_page_id == 0:
-                    self._front_matter_author_window = self._normalize_title(heading_text) != "abstract"
+                    self._front_matter_author_window = normalized_heading != "abstract"
                 else:
                     self._front_matter_author_window = False
 
             if self._skip_section_active:
-                self._record_removed(block, "excluded_section")
+                reason = "references_cutoff" if self._drop_remaining_blocks else "excluded_section"
+                self._record_removed(block, reason)
                 continue
 
             rendered = self._render_block(block, suppress_heading_ids=suppress_heading_ids)
