@@ -28,6 +28,7 @@ ollama pull qwen3-embedding:0.6b
 ## Repository Layout
 
 - `chunker/`: core pipeline code
+- `dbquery/`: LanceDB query rewriting, retrieval, fusion, and summarization
 - `marker/`: local Marker checkout and conversion outputs
 - `pdfs/`: source PDFs
 
@@ -38,6 +39,7 @@ ollama pull qwen3-embedding:0.6b
 - `chunker/llm_section_classifier.py`: LLM fallback classification, quintiles, and context retrieval
 - `chunker/run_section_classification.py`: CLI runner for classifying a filtered Markdown file
 - `dbinsert/`: LanceDB ingestion, indexing, full-pipeline orchestration, and inspection CLIs
+- `dbquery/`: query rewriting with Gemma, hybrid/vector/FTS retrieval, reciprocal-rank fusion, batch summaries, and synthesized summaries
 
 ## Requirements
 
@@ -258,6 +260,69 @@ The full pipeline defaults to the working external Gemma 4 setup:
 - python: `/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python`
 
 You normally do not need to pass these explicitly.
+
+## Query The Database
+
+After data has been ingested into LanceDB, query it with the `dbquery` pipeline:
+
+```bash
+./.venv/bin/python -m dbquery.run_query \
+  "How well do LLMs handle text generation at different CEFR levels?" \
+  --db-path data/lancedb \
+  --output-path outputs/llms_cefr_levels_query.md
+```
+
+This pipeline currently does the following:
+
+1. takes the original user query
+2. asks Gemma for two retrieval rewrites
+3. generates one HyDE paragraph for semantic retrieval
+4. runs five retrieval branches:
+   - original-query hybrid
+   - original-query full-text search
+   - rewrite-1 vector
+   - rewrite-2 vector
+   - HyDE vector
+5. deduplicates retrieved rows by `chunk_id`
+6. ranks the deduplicated rows with reciprocal rank fusion
+7. summarizes the top-ranked chunks in small batches
+8. synthesizes the batch summaries into a final summary
+
+The output artifact written by `--output-path` contains:
+
+- the ranked deduplicated chunks in final rank order
+- chunk metadata for inspection
+- the full chunk text for each ranked hit
+- the batch summaries
+- the synthesized summary appended at the end
+
+Useful query flags:
+
+- `--retrieval-depth`: number of results to keep from each retrieval branch before fusion
+- `--final-top-k`: number of fused ranked chunks to keep after dedupe and RRF
+- `--batch-size`: number of chunks to summarize per batch
+- `--rewrite-count`: number of Gemma rewrites to generate
+- `--rrf-k`: reciprocal-rank-fusion smoothing constant
+- `--min-rrf-lists`: minimum number of retrieval lists that must contain a chunk before it can survive fusion
+- `--min-relevance-score`: optional LanceDB relevance-score cutoff where applicable
+- `--no-hyde`: disable the HyDE retrieval branch
+
+Example with explicit tuning:
+
+```bash
+./.venv/bin/python -m dbquery.run_query \
+  "Why do LLMs not generate good quality CEFR texts?" \
+  --db-path data/lancedb \
+  --output-path outputs/llms_cefr_quality_query.md \
+  --retrieval-depth 12 \
+  --final-top-k 10 \
+  --batch-size 5
+```
+
+Operational note:
+
+- Like the classification pipeline, the Gemma query path may fail inside the sandbox because MLX/Metal initialization is machine-dependent.
+- On this machine, real Gemma query runs work reliably outside the sandbox with the external Unsloth MLX environment.
 
 ## Full Pipeline Reruns
 

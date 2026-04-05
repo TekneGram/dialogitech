@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from dbinsert.embedding_service import OllamaEmbeddingService
 from dbinsert.lancedb_schema import DEFAULT_TABLE_NAME
@@ -12,10 +13,12 @@ from .gemma_summarizer import GemmaBatchSummarizer
 from .hyde_generator import GemmaHyDEGenerator
 from .lancedb_retriever import LanceDBRetriever
 from .models import QueryRequest
+from .output_writer import QueryOutputWriter
 from .query_embedder import QueryEmbedder
 from .query_pipeline import QueryPipeline
 from .query_rewriter import GemmaQueryRewriter
 from .result_fuser import ReciprocalRankFuser
+from .synthesis_summarizer import GemmaSynthesisSummarizer
 
 DEFAULT_GEMMA_MODEL = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
 DEFAULT_GEMMA_PYTHON = "/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python"
@@ -43,6 +46,10 @@ def main() -> None:
         type=float,
         help="Optional minimum LanceDB hybrid relevance score filter.",
     )
+    parser.add_argument(
+        "--output-path",
+        help="Optional path to write ranked chunks and summaries for inspection.",
+    )
     parser.add_argument("--no-hyde", action="store_true", help="Disable HyDE retrieval.")
     args = parser.parse_args()
 
@@ -58,6 +65,7 @@ def main() -> None:
         result_fuser=ReciprocalRankFuser(k=args.rrf_k, min_lists=args.min_rrf_lists),
         chunk_batcher=ChunkBatcher(),
         summarizer=GemmaBatchSummarizer(gemma_client, CitationFormatter()),
+        synthesis_summarizer=GemmaSynthesisSummarizer(gemma_client),
     )
     result = pipeline.run(
         QueryRequest(
@@ -73,6 +81,10 @@ def main() -> None:
         )
     )
 
+    output_path: Path | None = None
+    if args.output_path:
+        output_path = QueryOutputWriter().write(result, args.output_path)
+
     print(f"query={result.request.query}")
     print(f"rewrites={result.rewrites}")
     print(f"hyde_present={result.hyde_text is not None}")
@@ -80,6 +92,8 @@ def main() -> None:
         print(f"hyde_text={result.hyde_text}")
     print(f"raw_hits={len(result.retrieved_chunks)}")
     print(f"fused_hits={len(result.fused_results)}")
+    if output_path is not None:
+        print(f"output_path={output_path}")
 
     for index, chunk in enumerate(result.fused_results, start=1):
         print(f"-- fused hit {index} --")
@@ -95,6 +109,10 @@ def main() -> None:
     for summary in result.summaries:
         print(f"-- summary batch {summary.batch_index} --")
         print(summary.summary_text)
+
+    if result.synthesized_summary is not None:
+        print("-- synthesized summary --")
+        print(result.synthesized_summary)
 
 
 if __name__ == "__main__":

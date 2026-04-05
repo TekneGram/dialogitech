@@ -22,6 +22,7 @@ The key architectural rule is that incomplete classification is not acceptable. 
 
 - `chunker/`: active project code for metadata extraction, filtering, chunking, and classification
 - `dbinsert/`: LanceDB schema, embedding, ingestion, indexing, and full-pipeline orchestration
+- `dbquery/`: query rewriting, retrieval, ranking, and summarization over LanceDB
 - `marker/`: local Marker checkout plus conversion outputs
 - `pdfs/`: source PDFs
 
@@ -150,6 +151,28 @@ Creates LanceDB vector, full-text, and scalar indexes.
 
 Index creation must be idempotent. Repeated ingests should not fail because an index already exists.
 
+### `dbquery/`
+
+Database-query code should stay modular and split by responsibility.
+
+Preferred shape:
+
+- one main class per file
+- one concern per class
+- orchestration in a pipeline/coordinator class
+- prompt construction and response parsing in the LLM-facing class that owns that prompt
+- database retrieval in a retrieval-specific class
+- ranking/fusion in a ranking-specific class
+- output rendering in a writer-specific class
+
+If logic starts getting long:
+
+- move shared helpers into small modules under `dbquery/utils/`
+- keep helpers narrow and reusable
+- avoid growing one file into a mixed retrieval-plus-prompt-plus-output module
+
+For `dbquery`, prefer small files and explicit dependency injection over large utility-heavy base classes.
+
 ## Runtime Model Setup
 
 The repo `.venv` is for the repo itself and should stay Marker-compatible.
@@ -213,6 +236,9 @@ For database rows, also preserve paper-level metadata such as:
 - Preserve repo `.venv` dependency integrity.
 - Keep new code modular; avoid putting orchestration, prompting, parsing, and runtime control into one file.
 - Treat `References` as the end of the paper body.
+- In `dbquery`, keep files short and focused.
+- In `dbquery`, classes should own a single responsibility and should not become long mixed-purpose classes.
+- In `dbquery`, move formatting, ranking math, or text-budget helpers into subfolders such as `dbquery/utils/` when that keeps primary classes small.
 
 ## Full Pipeline Behavior
 

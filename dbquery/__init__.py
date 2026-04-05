@@ -12,10 +12,12 @@ from .models import (
     SearchVariant,
     SummaryBatch,
 )
+from .output_writer import QueryOutputWriter
 from .query_embedder import QueryEmbedder
 from .query_pipeline import QueryPipeline
 from .query_rewriter import GemmaQueryRewriter
 from .result_fuser import ReciprocalRankFuser
+from .synthesis_summarizer import GemmaSynthesisSummarizer
 
 __all__ = [
     "BatchSummary",
@@ -26,6 +28,7 @@ __all__ = [
     "GemmaHyDEGenerator",
     "GemmaQueryRewriter",
     "LanceDBRetriever",
+    "QueryOutputWriter",
     "QueryEmbedder",
     "QueryPipeline",
     "QueryPipelineResult",
@@ -34,4 +37,5 @@ __all__ = [
     "RetrievedChunk",
     "SearchVariant",
     "SummaryBatch",
+    "GemmaSynthesisSummarizer",
 ]

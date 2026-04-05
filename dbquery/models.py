@@ -102,3 +102,4 @@ class QueryPipelineResult:
     fused_results: list[FusedChunkResult]
     summary_batches: list[SummaryBatch]
     summaries: list[BatchSummary]
+    synthesized_summary: str | None = None
