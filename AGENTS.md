@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository appears to contain Python utilities for document processing and chunking, with primary source code in `chunker/`.
+This repository contains Python utilities for document processing and chunking, with primary source code in `chunker/`.
 
 ## Working Agreement
 

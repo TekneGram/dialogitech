@@ -6,9 +6,23 @@ from .markdown_section_chunker import (
     MarkdownSectionChunker,
     SectionChunk,
 )
+from .section_classifier import (
+    ChunkClassification,
+    ChunkClassificationEnricher,
+    ChunkClassificationLLM,
+    ClassifiedHeadingSplit,
+    ClassifiedSectionChunk,
+    DeterministicSectionClassifier,
+)
 
 __all__ = [
     "BoilerplateFilter",
+    "ChunkClassification",
+    "ChunkClassificationEnricher",
+    "ChunkClassificationLLM",
+    "ClassifiedHeadingSplit",
+    "ClassifiedSectionChunk",
+    "DeterministicSectionClassifier",
     "HeadingSplit",
     "MarkdownHeading",
     "MarkdownSectionChunker",
