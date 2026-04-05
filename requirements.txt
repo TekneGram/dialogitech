@@ -1,0 +1,2 @@
+-e ./marker
+mlx-lm==0.31.1
