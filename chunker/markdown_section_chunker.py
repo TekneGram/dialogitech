@@ -164,7 +164,12 @@ class MarkdownSectionChunker:
             if end_word_index >= total_words - 1:
                 break
 
-            next_start = max(0, end_word_index + 1 - self.overlap_words)
+            next_start = self._next_chunk_start_word_index(
+                content=stripped_content,
+                words=words,
+                current_start_word_index=start_word_index,
+                end_word_index=end_word_index,
+            )
             if next_start <= start_word_index:
                 next_start = min(total_words, start_word_index + self.min_words)
             start_word_index = next_start
@@ -210,6 +215,49 @@ class MarkdownSectionChunker:
             else:
                 break
         return last_index
+
+    def _next_chunk_start_word_index(
+        self,
+        content: str,
+        words: list[re.Match[str]],
+        current_start_word_index: int,
+        end_word_index: int,
+    ) -> int:
+        tentative_start = max(0, end_word_index + 1 - self.overlap_words)
+        if tentative_start <= current_start_word_index:
+            return tentative_start
+
+        sentence_start_char = self._find_sentence_start_before_char(
+            content=content,
+            char_index=words[tentative_start].start(),
+        )
+        if sentence_start_char is None:
+            return tentative_start
+
+        adjusted_start = self._find_first_word_index_at_or_after_char(words, sentence_start_char)
+        return adjusted_start if adjusted_start > current_start_word_index else tentative_start
+
+    def _find_sentence_start_before_char(self, content: str, char_index: int) -> int | None:
+        sentence_start = 0
+        found_boundary = False
+
+        for match in self.SENTENCE_END_PATTERN.finditer(content):
+            if match.end() >= char_index:
+                break
+            sentence_start = match.end()
+            found_boundary = True
+
+        return sentence_start if found_boundary else None
+
+    def _find_first_word_index_at_or_after_char(
+        self,
+        words: list[re.Match[str]],
+        char_index: int,
+    ) -> int:
+        for index, match in enumerate(words):
+            if match.start() >= char_index:
+                return index
+        return len(words) - 1
 
     def _normalize_heading_title(self, title: str) -> str:
         cleaned = title.strip()
