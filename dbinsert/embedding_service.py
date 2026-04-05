@@ -36,8 +36,12 @@ class EmbeddingService(ABC):
                     paper_title=chunk.paper_title,
                     authors=list(chunk.authors),
                     journal=chunk.journal,
+                    volume=chunk.volume,
+                    issue=chunk.issue,
                     year=chunk.year,
                     doi=chunk.doi,
+                    issn=chunk.issn,
+                    references=list(chunk.references),
                     section_title=chunk.section_title,
                     heading_level=chunk.heading_level,
                     chunk_index=chunk.chunk_index,
@@ -50,6 +54,7 @@ class EmbeddingService(ABC):
                     reason=chunk.reason,
                     embedding=list(embedding),
                     markdown_path=chunk.markdown_path,
+                    marker_json_path=chunk.marker_json_path,
                     pdf_path=chunk.pdf_path,
                 )
             )

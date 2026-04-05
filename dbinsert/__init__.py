@@ -4,6 +4,7 @@ from .embedding_service import (
     OllamaEmbeddingService,
     OpenAIEmbeddingService,
 )
+from .full_pipeline_service import PdfToLancePipeline
 from .index_manager import LanceIndexManager
 from .ingest_service import ChunkIngestionService
 from .lancedb_client import LanceChunkStore
@@ -28,6 +29,7 @@ __all__ = [
     "DeterministicHashEmbeddingService",
     "EmbeddedChunkRecord",
     "EmbeddingService",
+    "PdfToLancePipeline",
     "LanceChunkStore",
     "LanceIndexManager",
     "OllamaEmbeddingService",
