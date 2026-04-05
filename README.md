@@ -35,6 +35,14 @@ Install the repo dependencies:
 ./.venv/bin/pip install -r requirements.txt
 ```
 
+This installs the Marker-compatible repo environment plus local LanceDB ingestion dependencies.
+
+If you need the optional in-process MLX package in a separate environment, install:
+
+```bash
+python -m pip install -r requirements-mlx.txt
+```
+
 ## Basic Flow
 
 There are two entry points:
@@ -132,3 +140,35 @@ classified = ChunkClassificationEnricher(llm_classifier=llm).enrich_heading_spli
 - The Gemma 4 runtime is intentionally isolated in a separate Unsloth environment.
 - The large downloaded Gemma model files live in the Hugging Face cache, not in this repo.
 - Generated outputs such as classified JSON files should be treated as derived artifacts.
+
+## LanceDB Ingestion
+
+Install the local ingestion dependencies into the repo `.venv`:
+
+```bash
+./.venv/bin/pip install -r requirements.txt
+```
+
+Pull the local Ollama embedding model:
+
+```bash
+ollama pull qwen3-embedding:0.6b
+```
+
+Ingest one classified paper:
+
+```bash
+./.venv/bin/python -m dbinsert.run_ingest \
+  --db-path data/lancedb \
+  --classified-json marker/conversion_results/2025_Uchida/2025_Uchida_classified_chunks.json \
+  --marker-json marker/conversion_results/2025_Uchida/2025_Uchida.json \
+  --replace-existing
+```
+
+Inspect the stored table:
+
+```bash
+./.venv/bin/python -m dbinsert.inspect_table \
+  --db-path data/lancedb \
+  --paper-id 2025_Uchida
+```
