@@ -12,7 +12,7 @@ from .gemma_client import GemmaClient
 from .gemma_summarizer import GemmaBatchSummarizer
 from .hyde_generator import GemmaHyDEGenerator
 from .lancedb_retriever import LanceDBRetriever
-from .models import QueryRequest
+from .models import QueryFilters, QueryRequest
 from .output_writer import QueryOutputWriter
 from .query_embedder import QueryEmbedder
 from .query_pipeline import QueryPipeline
@@ -56,6 +56,22 @@ def main() -> None:
         "--output-path",
         help="Optional path to write ranked chunks and summaries for inspection.",
     )
+    parser.add_argument("--paper-id", help="Restrict retrieval to a single paper ID.")
+    parser.add_argument("--year", type=int, help="Restrict retrieval to a specific publication year.")
+    parser.add_argument(
+        "--paper-title-contains",
+        help="Restrict retrieval to papers whose titles contain this substring.",
+    )
+    parser.add_argument(
+        "--classification-label",
+        help="Restrict retrieval to chunks with a specific classification label.",
+    )
+    parser.add_argument(
+        "--author",
+        "--authors",
+        dest="author",
+        help="Restrict retrieval to chunks whose author list contains this string.",
+    )
     parser.add_argument("--no-hyde", action="store_true", help="Disable HyDE retrieval.")
     args = parser.parse_args()
 
@@ -85,6 +101,13 @@ def main() -> None:
             min_rrf_lists=args.min_rrf_lists,
             rrf_k=args.rrf_k,
             min_relevance_score=args.min_relevance_score,
+            filters=QueryFilters(
+                paper_id=args.paper_id,
+                year=args.year,
+                paper_title_contains=args.paper_title_contains,
+                classification_label=args.classification_label,
+                author=args.author,
+            ),
         )
     )
 
@@ -94,6 +117,8 @@ def main() -> None:
 
     print(f"query={result.request.query}")
     print(f"retrieval_mode={result.request.retrieval_mode}")
+    if result.request.filters is not None:
+        print(f"filters={result.request.filters}")
     print(f"rewrites={result.rewrites}")
     print(f"hyde_present={result.hyde_text is not None}")
     if result.hyde_text is not None:

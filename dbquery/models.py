@@ -10,6 +10,21 @@ RetrievalMode = Literal["full", "fts_only", "hybrid_only", "fts_hybrid"]
 
 
 @dataclass(slots=True)
+class QueryFilters:
+    paper_id: str | None = None
+    paper_id_in: list[str] = field(default_factory=list)
+    year: int | None = None
+    year_min: int | None = None
+    year_max: int | None = None
+    paper_title_contains: str | None = None
+    classification_label: str | None = None
+    classification_label_in: list[str] = field(default_factory=list)
+    section_title_contains: str | None = None
+    author: str | None = None
+    authors_any: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class QueryRequest:
     query: str
     retrieval_mode: RetrievalMode = "full"
@@ -21,6 +36,7 @@ class QueryRequest:
     min_rrf_lists: int = 1
     rrf_k: int = 60
     min_relevance_score: float | None = None
+    filters: QueryFilters | None = None
 
 
 @dataclass(slots=True)

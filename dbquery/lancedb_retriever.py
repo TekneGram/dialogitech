@@ -6,7 +6,8 @@ from typing import Any
 import lancedb
 from lancedb.rerankers import RRFReranker
 
-from .models import RetrievedChunk, RetrievalKind, SearchVariant
+from .models import QueryFilters, RetrievedChunk, RetrievalKind, SearchVariant
+from .utils import build_where_clause, expanded_limit_for_filters, row_matches_filters
 
 
 class LanceDBRetriever:
@@ -35,7 +36,10 @@ class LanceDBRetriever:
         limit: int,
         vector: list[float] | None = None,
         min_relevance_score: float | None = None,
+        filters: QueryFilters | None = None,
     ) -> list[RetrievedChunk]:
+        expanded_limit = expanded_limit_for_filters(limit, filters)
+        where_clause = build_where_clause(filters)
         if variant.retrieval_kind == "hybrid":
             if vector is None:
                 raise RuntimeError("Hybrid retrieval requires an embedded query vector.")
@@ -44,25 +48,35 @@ class LanceDBRetriever:
                 .vector(vector)
                 .text(variant.text)
                 .rerank(RRFReranker())
-                .limit(limit)
+                .limit(expanded_limit)
             )
         elif variant.retrieval_kind == "fts":
-            query = self.table.search(variant.text, query_type="fts", fts_columns="text").limit(limit)
+            query = self.table.search(variant.text, query_type="fts", fts_columns="text").limit(expanded_limit)
         elif variant.retrieval_kind == "vector":
             if vector is None:
                 raise RuntimeError("Vector retrieval requires an embedded query vector.")
-            query = self.table.search(vector, query_type="vector", vector_column_name="embedding").limit(limit)
+            query = self.table.search(vector, query_type="vector", vector_column_name="embedding").limit(
+                expanded_limit
+            )
         else:
             raise RuntimeError(f"Unsupported retrieval kind: {variant.retrieval_kind}")
 
+        if where_clause:
+            query = query.where(where_clause)
+
         rows = query.to_list()
         results: list[RetrievedChunk] = []
-        for rank, row in enumerate(rows, start=1):
+        for row in rows:
+            if not row_matches_filters(row, filters):
+                continue
             relevance_score = _as_float(row.get("_relevance_score"))
             if min_relevance_score is not None and relevance_score is not None:
                 if relevance_score < min_relevance_score:
                     continue
+            rank = len(results) + 1
             results.append(self._row_to_retrieved_chunk(row=row, variant=variant, rank=rank))
+            if len(results) >= limit:
+                break
         return results
 
     def _row_to_retrieved_chunk(

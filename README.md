@@ -306,6 +306,11 @@ Useful query flags:
 - `--rrf-k`: reciprocal-rank-fusion smoothing constant
 - `--min-rrf-lists`: minimum number of retrieval lists that must contain a chunk before it can survive fusion
 - `--min-relevance-score`: optional LanceDB relevance-score cutoff where applicable
+- `--paper-id`: restrict retrieval to a single paper
+- `--year`: restrict retrieval to a publication year
+- `--paper-title-contains`: restrict retrieval to papers whose title contains a substring
+- `--classification-label`: restrict retrieval to chunks with a specific section label
+- `--author` or `--authors`: restrict retrieval to chunks whose author list contains a string
 - `--no-hyde`: disable the HyDE retrieval branch
 
 Retrieval mode guidance:
@@ -335,6 +340,20 @@ Example for an exact-term lookup:
   --db-path data/lancedb \
   --retrieval-mode fts_only \
   --output-path outputs/vpersent_query.md
+```
+
+Example with metadata filtering:
+
+```bash
+./.venv/bin/python -m dbquery.run_query \
+  "What is vpersent?" \
+  --db-path data/lancedb \
+  --retrieval-mode fts_only \
+  --paper-id 2025_Uchida \
+  --year 2025 \
+  --paper-title-contains CEFR \
+  --author Uchida \
+  --output-path outputs/vpersent_filtered_query.md
 ```
 
 Operational note:
