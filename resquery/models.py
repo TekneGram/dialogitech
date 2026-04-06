@@ -150,3 +150,53 @@ class ResQueryResult:
     state_update: StateUpdate
     session_path: str
     turn_output_path: str | None = None
+
+
+@dataclass(slots=True)
+class BranchTurnSynthesisInput:
+    turn_id: str
+    user_question: str
+    synthesized_summary: str
+
+
+@dataclass(slots=True)
+class BranchClaimProvenance:
+    provenance_label: str
+    claim_id: str
+    text: str
+    status: str
+    confidence: str
+    created_in_turn: str
+    paper_ids: list[str] = field(default_factory=list)
+    evidence_chunk_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class BranchSynthesisInput:
+    branch_id: str
+    branch_label: str
+    root_query: str
+    turns: list[BranchTurnSynthesisInput] = field(default_factory=list)
+    claim_provenance: list[BranchClaimProvenance] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class BranchSynthesisResult:
+    branch_id: str
+    branch_label: str
+    summary_text: str
+    rendered_context: str
+
+
+@dataclass(slots=True)
+class BranchComparisonResult:
+    left_branch_id: str
+    right_branch_id: str
+    comparison_text: str
+
+
+@dataclass(slots=True)
+class SessionSynthesisResult:
+    session_state: ResearchSessionState
+    branch_summaries: list[BranchSynthesisResult] = field(default_factory=list)
+    branch_comparisons: list[BranchComparisonResult] = field(default_factory=list)
