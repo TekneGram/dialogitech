@@ -29,6 +29,7 @@ ollama pull qwen3-embedding:0.6b
 
 - `chunker/`: core pipeline code
 - `dbquery/`: LanceDB query rewriting, retrieval, fusion, and summarization
+- `dbxquery/`: grounded follow-up querying over prior synthesized summaries
 - `marker/`: local Marker checkout and conversion outputs
 - `pdfs/`: source PDFs
 
@@ -40,6 +41,7 @@ ollama pull qwen3-embedding:0.6b
 - `chunker/run_section_classification.py`: CLI runner for classifying a filtered Markdown file
 - `dbinsert/`: LanceDB ingestion, indexing, full-pipeline orchestration, and inspection CLIs
 - `dbquery/`: query rewriting with Gemma, hybrid/vector/FTS retrieval, reciprocal-rank fusion, batch summaries, and synthesized summaries
+- `dbxquery/`: single-turn grounded follow-up planning, filtered evidence retrieval, and answer writing over prior summary outputs
 
 ## Requirements
 
@@ -128,7 +130,7 @@ ollama list
 Check the repo environment:
 
 ```bash
-./.venv/bin/python -m compileall chunker dbinsert
+./.venv/bin/python -m compileall chunker dbinsert dbquery dbxquery
 ```
 
 ## Basic Flow
@@ -243,6 +245,15 @@ Run the full pipeline from a single PDF:
   --replace-existing
 ```
 
+Run the full pipeline over a folder of PDFs:
+
+```bash
+./.venv/bin/python -m dbinsert.run_full_pipeline_folder \
+  pdfs \
+  --db-path data/lancedb \
+  --replace-existing
+```
+
 This will:
 
 - derive `paper_id` from the PDF filename
@@ -253,6 +264,17 @@ This will:
 - classify chunks with deterministic rules plus Gemma fallback for unresolved chunks
 - generate local Ollama embeddings with `qwen3-embedding:0.6b`
 - insert chunk rows plus metadata into LanceDB
+
+The folder runner processes PDFs sequentially. If one PDF fails, the error is printed and recorded in the final batch summary, and the run continues with the remaining files. The command exits non-zero at the end if any file failed.
+
+If required metadata is missing after Marker extraction, the pipeline pauses and asks for manual terminal input for:
+
+- title
+- authors
+- journal name
+- publication year
+
+The prompt includes the current `paper_id`, PDF path, and Marker JSON path so you can identify the file being processed. In the folder runner, if metadata entry is aborted or unavailable for a file, that file is logged as failed and the batch continues.
 
 The full pipeline defaults to the working external Gemma 4 setup:
 
@@ -360,6 +382,49 @@ Operational note:
 
 - Like the classification pipeline, the Gemma query path may fail inside the sandbox because MLX/Metal initialization is machine-dependent.
 - On this machine, real Gemma query runs work reliably outside the sandbox with the external Unsloth MLX environment.
+
+## Follow-up Queries
+
+After a `dbquery` run has written a markdown artifact with a synthesized summary, query that summary with the `dbxquery` follow-up pipeline:
+
+```bash
+./.venv/bin/python -m dbxquery.run_followup \
+  "Tell me how Zhu and Uchida differ on this issue?" \
+  --prior-summary-path outputs/llms_cefr_quality_query.md \
+  --db-path data/lancedb \
+  --output-path xoutputs/zhu_vs_uchida_differences_followup.md
+```
+
+This first version currently does the following:
+
+1. reads the prior query artifact
+2. extracts only the `## Synthesized Summary` section when present
+3. asks Gemma to emit a strict JSON evidence plan from `prior summary + user question`
+4. validates the plan against a closed schema
+5. runs one to three filtered evidence retrieval calls against LanceDB
+6. asks Gemma to answer using only the retrieved evidence
+7. writes a trace containing the prior summary, plan, tool calls, evidence, and final answer
+
+The current `dbxquery` scope is intentionally narrow:
+
+- single-turn only
+- synchronous only
+- one fixed tool: `retrieve_evidence`
+- closed-set filters only: `paper_id_in`, `authors_any`, `year_min`, `year_max`, `classification_label_in`, `section_title_contains`
+
+The output artifact written by `--output-path` contains:
+
+- the extracted synthesized summary used as context
+- the evidence plan produced by Gemma
+- each retrieval tool call
+- the retrieved evidence chunks
+- the final grounded answer
+- the chunk IDs and paper IDs used in the answer
+
+Operational note:
+
+- Like the classification and `dbquery` paths, `dbxquery` may fail inside the sandbox because the external Gemma MLX runtime depends on Metal.
+- On this machine, real `dbxquery` runs work reliably outside the sandbox with the external Unsloth MLX environment.
 
 ## Full Pipeline Reruns
 

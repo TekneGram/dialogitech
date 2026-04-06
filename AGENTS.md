@@ -23,6 +23,7 @@ The key architectural rule is that incomplete classification is not acceptable. 
 - `chunker/`: active project code for metadata extraction, filtering, chunking, and classification
 - `dbinsert/`: LanceDB schema, embedding, ingestion, indexing, and full-pipeline orchestration
 - `dbquery/`: query rewriting, retrieval, ranking, and summarization over LanceDB
+- `dbxquery/`: grounded follow-up querying over prior synthesized summaries
 - `marker/`: local Marker checkout plus conversion outputs
 - `pdfs/`: source PDFs
 
@@ -173,6 +174,41 @@ If logic starts getting long:
 
 For `dbquery`, prefer small files and explicit dependency injection over large utility-heavy base classes.
 
+### `dbxquery/`
+
+Follow-up query code should stay modular and split by responsibility.
+
+Preferred shape:
+
+- one main class per file
+- one concern per class
+- orchestration in a follow-up pipeline/coordinator class
+- evidence planning in an LLM-facing planner class
+- plan validation in a validator class
+- evidence retrieval in a retrieval adapter class
+- grounded answer writing in an LLM-facing writer class
+- shared parsing or prompt helpers in `dbxquery/utils/`
+
+Current scope:
+
+- single-turn only
+- synchronous only
+- follow-up input is `prior synthesized summary + user question`
+- Gemma emits a strict JSON evidence plan
+- the plan may call only one tool: `retrieve_evidence`
+- the final answer must be written from retrieved evidence only
+
+Allowed follow-up filters are:
+
+- `paper_id_in`
+- `authors_any`
+- `year_min`
+- `year_max`
+- `classification_label_in`
+- `section_title_contains`
+
+`dbxquery` should prefer the `## Synthesized Summary` section from a prior `dbquery` output artifact when present, rather than reusing the entire prior query markdown file as prompt context.
+
 ## Runtime Model Setup
 
 The repo `.venv` is for the repo itself and should stay Marker-compatible.
@@ -239,6 +275,10 @@ For database rows, also preserve paper-level metadata such as:
 - In `dbquery`, keep files short and focused.
 - In `dbquery`, classes should own a single responsibility and should not become long mixed-purpose classes.
 - In `dbquery`, move formatting, ranking math, or text-budget helpers into subfolders such as `dbquery/utils/` when that keeps primary classes small.
+- In `dbxquery`, keep files short and focused.
+- In `dbxquery`, classes should own a single responsibility and should not become long mixed-purpose classes.
+- In `dbxquery`, keep planner output tightly schema-constrained and validate it before retrieval runs.
+- In `dbxquery`, final answers must be grounded only in retrieved evidence; if evidence is weak or missing, the answer should say so explicitly.
 
 ## Full Pipeline Behavior
 
@@ -265,6 +305,13 @@ When changing classification or filtering code, verify at least:
 2. deterministic classification on `marker/conversion_results/2025_Uchida/2025_Uchida_filtered.md`
 3. if touching the LLM path, one real fallback chunk through the external Gemma runtime
 4. if touching filtering, confirm appendix content after references is absent from regenerated filtered markdown
+
+When changing `dbquery` or `dbxquery`, verify at least:
+
+1. `./.venv/bin/python -m compileall dbquery dbxquery`
+2. one `dbquery` run that writes an output artifact with a synthesized summary
+3. if touching `dbxquery`, one real follow-up run through the external Gemma runtime
+4. if touching follow-up filtering, confirm the saved trace records the tool calls, retrieved evidence, and grounded final answer
 
 ## Useful Commands
 
@@ -302,4 +349,14 @@ Rerun filtered markdown and classification only:
   --replace-existing \
   --rerun-filtered-markdown \
   --rerun-classification
+```
+
+Run a follow-up query over a prior synthesized summary:
+
+```bash
+./.venv/bin/python -m dbxquery.run_followup \
+  "Tell me how Zhu and Uchida differ on this issue?" \
+  --prior-summary-path outputs/llms_cefr_quality_query.md \
+  --db-path data/lancedb \
+  --output-path xoutputs/zhu_vs_uchida_differences_followup.md
 ```
