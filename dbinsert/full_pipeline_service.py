@@ -16,6 +16,11 @@ from chunker.metadata_extractor import MetadataExtractor
 from chunker.section_classifier import ChunkClassificationEnricher, ClassifiedHeadingSplit
 
 from .ingest_service import ChunkIngestionService
+from .metadata_checker import (
+    InteractiveMetadataPrompter,
+    MetadataCompletenessChecker,
+    MetadataPromptContext,
+)
 from .models import PaperMetadataRecord
 from .pipeline_loader import load_classified_heading_splits
 
@@ -39,6 +44,8 @@ class PdfToLancePipeline:
         self.conversion_root = Path(conversion_root)
         self.min_words = min_words
         self.overlap_words = overlap_words
+        self.metadata_checker = MetadataCompletenessChecker()
+        self.metadata_prompter = InteractiveMetadataPrompter()
 
     def process_pdf(
         self,
@@ -90,6 +97,12 @@ class PdfToLancePipeline:
         metadata_extractor = MetadataExtractor()
         document = metadata_extractor.load_json(marker_json_path)
         extracted_metadata = metadata_extractor.extract_all(document)
+        extracted_metadata = self._ensure_required_metadata(
+            paper_id=paper_id,
+            pdf_path=pdf_path,
+            marker_json_path=marker_json_path,
+            extracted_metadata=extracted_metadata,
+        )
 
         if rerun_filtered_markdown or not filtered_markdown_path.exists():
             self._emit_stage(f"[{paper_id}] Generating filtered markdown.")
@@ -176,6 +189,38 @@ class PdfToLancePipeline:
             "classification_log_path": str(classification_log_path),
             "inserted_chunks": inserted_count,
         }
+
+    def _ensure_required_metadata(
+        self,
+        *,
+        paper_id: str,
+        pdf_path: Path,
+        marker_json_path: Path,
+        extracted_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        issues = self.metadata_checker.find_missing_fields(extracted_metadata)
+        if not issues:
+            return extracted_metadata
+
+        self._emit_stage(
+            f"[{paper_id}] Missing required metadata detected. Prompting for manual entry."
+        )
+        completed_metadata = self.metadata_prompter.complete_metadata(
+            extracted_metadata,
+            context=MetadataPromptContext(
+                paper_id=paper_id,
+                pdf_path=pdf_path,
+                marker_json_path=marker_json_path,
+            ),
+            issues=issues,
+        )
+
+        remaining_issues = self.metadata_checker.find_missing_fields(completed_metadata)
+        if remaining_issues:
+            missing = ", ".join(issue.field_name for issue in remaining_issues)
+            raise RuntimeError(f"[{paper_id}] Required metadata is still incomplete after prompting: {missing}")
+
+        return completed_metadata
 
     def _run_marker(self, *, pdf_path: Path, output_dir: Path, marker_log_path: Path) -> None:
         repo_root = Path(__file__).resolve().parent.parent
