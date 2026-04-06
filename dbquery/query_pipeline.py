@@ -4,7 +4,7 @@ from .chunk_batcher import ChunkBatcher
 from .gemma_summarizer import GemmaBatchSummarizer
 from .hyde_generator import GemmaHyDEGenerator
 from .lancedb_retriever import LanceDBRetriever
-from .models import QueryPipelineResult, QueryRequest, RetrievalMode, SearchVariant
+from .models import QueryPipelineResult, QueryRequest, RetrievedChunk, RetrievalMode, SearchVariant
 from .query_embedder import QueryEmbedder
 from .query_rewriter import GemmaQueryRewriter
 from .result_fuser import ReciprocalRankFuser
@@ -34,6 +34,7 @@ class QueryPipeline:
         self.synthesis_summarizer = synthesis_summarizer
 
     def run(self, request: QueryRequest) -> QueryPipelineResult:
+        candidate_limit = request.candidate_pool_k or request.retrieval_depth
         rewrites: list[str] = []
         if self._should_generate_rewrites(request.retrieval_mode):
             rewrites = self.query_rewriter.rewrite(request.query, rewrite_count=request.rewrite_count)
@@ -59,11 +60,17 @@ class QueryPipeline:
                 self.retriever.retrieve(
                     variant=variant,
                     vector=embedded_variants.get(variant.key),
-                    limit=request.retrieval_depth,
+                    limit=candidate_limit,
                     min_relevance_score=request.min_relevance_score,
                     filters=request.filters,
                 )
             )
+
+        retrieved_chunks = self._apply_exclusions(
+            retrieved_chunks,
+            exclude_chunk_ids=request.exclude_chunk_ids,
+            exclude_paper_ids=request.exclude_paper_ids,
+        )
 
         fused_results = self.result_fuser.fuse(
             retrieved_chunks,
@@ -92,6 +99,27 @@ class QueryPipeline:
             summaries=summaries,
             synthesized_summary=synthesized_summary,
         )
+
+    def _apply_exclusions(
+        self,
+        retrieved_chunks: list[RetrievedChunk],
+        *,
+        exclude_chunk_ids: list[str],
+        exclude_paper_ids: list[str],
+    ) -> list[RetrievedChunk]:
+        if not exclude_chunk_ids and not exclude_paper_ids:
+            return retrieved_chunks
+
+        excluded_chunk_ids = set(exclude_chunk_ids)
+        excluded_paper_ids = set(exclude_paper_ids)
+        filtered: list[RetrievedChunk] = []
+        for chunk in retrieved_chunks:
+            if chunk.chunk_id in excluded_chunk_ids:
+                continue
+            if chunk.paper_id in excluded_paper_ids:
+                continue
+            filtered.append(chunk)
+        return filtered
 
     def _build_variants(
         self,

@@ -1,12 +1,15 @@
 # Research Session Turn
 
-Session path: ressessions/llm_weaknesses_refactor_check.json
+Session path: ressessions/llm_weaknesses.json
 Turn: t1
+Branch: b1
+Run mode: continue
 User question: What are the weaknesses of LLMs?
 
 ## Selected Prior State
 
 Root query: What are the weaknesses of LLMs?
+Selected branch: b1
 
 ### Prior Claims
 
@@ -27,9 +30,13 @@ Text sent to dbquery:
 What are the weaknesses of LLMs?
 ```
 
+Excluded chunk_ids: [none]
+Excluded paper_ids: [none]
+Candidate pool k: [default]
+
 ## dbquery Artifact
 
-Query artifact path: resoutputs/llm_weaknesses_refactor_check_t1_dbquery.md
+Query artifact path: resoutputs/llm_weaknesses_t1_dbquery.md
 
 ## Synthesized Summary
 
@@ -59,8 +66,10 @@ Other noted limitations include computational constraints, such as restrictions 
 
 ## Session Snapshot
 
-session_id: llm_weaknesses_refactor_check
+session_id: llm_weaknesses
 root_query: What are the weaknesses of LLMs?
+active_branch_id: b1
+branch_count: 1
 turn_count: 1
 claim_count: 6
 followup_count: 4

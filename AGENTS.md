@@ -24,6 +24,7 @@ The key architectural rule is that incomplete classification is not acceptable. 
 - `dbinsert/`: LanceDB schema, embedding, ingestion, indexing, and full-pipeline orchestration
 - `dbquery/`: query rewriting, retrieval, ranking, and summarization over LanceDB
 - `dbxquery/`: grounded follow-up querying over prior synthesized summaries
+- `resquery/`: iterative research sessions over LanceDB using prior claims as turn context
 - `marker/`: local Marker checkout plus conversion outputs
 - `pdfs/`: source PDFs
 
@@ -209,6 +210,44 @@ Allowed follow-up filters are:
 
 `dbxquery` should prefer the `## Synthesized Summary` section from a prior `dbquery` output artifact when present, rather than reusing the entire prior query markdown file as prompt context.
 
+### `resquery/`
+
+Iterative research-session code should stay modular and split by responsibility.
+
+Preferred shape:
+
+- one main class per file
+- one concern per class
+- orchestration in a session pipeline/coordinator class
+- query-context construction in a dedicated builder class
+- claim extraction in a dedicated LLM-facing extractor class
+- follow-up suggestion generation in a dedicated LLM-facing suggester class
+- session persistence in a state store class
+- output rendering in a writer class
+- shared parsing or prompt helpers in `resquery/utils/`
+
+Current scope:
+
+- multi-turn only
+- synchronous only
+- prior claims are the main reusable session memory
+- follow-up suggestions are user-facing suggestions only, not resolved/unresolved state
+- `dbquery` remains the retrieval and synthesis engine
+- the next turn query should be contextualized as:
+  `This is what we know so far + prior claims + new user question`
+- claims should be extracted from individual `dbquery` batch summaries, not from the final synthesized summary and not from raw fused chunks
+- claim evidence should be attached programmatically from the `chunk_ids` already stored on each batch summary
+
+`resquery` should preserve a compact research session with:
+
+- session metadata
+- ordered turns
+- prior claims
+- follow-up suggestions
+- evidence index metadata
+
+`resquery` should not reintroduce `active_focus` or resolved/unresolved question tracking unless there is a clear new requirement.
+
 ## Runtime Model Setup
 
 The repo `.venv` is for the repo itself and should stay Marker-compatible.
@@ -279,6 +318,11 @@ For database rows, also preserve paper-level metadata such as:
 - In `dbxquery`, classes should own a single responsibility and should not become long mixed-purpose classes.
 - In `dbxquery`, keep planner output tightly schema-constrained and validate it before retrieval runs.
 - In `dbxquery`, final answers must be grounded only in retrieved evidence; if evidence is weak or missing, the answer should say so explicitly.
+- In `resquery`, keep files short and focused.
+- In `resquery`, classes should own a single responsibility and should not become long mixed-purpose classes.
+- In `resquery`, prior claims should influence the next `dbquery` turn by contextualizing the query text before retrieval runs.
+- In `resquery`, claim provenance should come from known `dbquery` batch-summary `chunk_ids`, not from model-generated chunk IDs.
+- In `resquery`, follow-up suggestions are suggestions for the user, not a state machine.
 
 ## Full Pipeline Behavior
 
@@ -306,12 +350,18 @@ When changing classification or filtering code, verify at least:
 3. if touching the LLM path, one real fallback chunk through the external Gemma runtime
 4. if touching filtering, confirm appendix content after references is absent from regenerated filtered markdown
 
-When changing `dbquery` or `dbxquery`, verify at least:
+When changing `dbquery`, `dbxquery`, or `resquery`, verify at least:
 
-1. `./.venv/bin/python -m compileall dbquery dbxquery`
+1. `./.venv/bin/python -m compileall dbquery dbxquery resquery`
 2. one `dbquery` run that writes an output artifact with a synthesized summary
 3. if touching `dbxquery`, one real follow-up run through the external Gemma runtime
-4. if touching follow-up filtering, confirm the saved trace records the tool calls, retrieved evidence, and grounded final answer
+4. if touching `resquery`, one real multi-turn `resquery` session through the external Gemma runtime
+5. if touching `resquery`, confirm that:
+   - prior claims are present in the contextualized query text sent to `dbquery`
+   - claims are extracted from batch summaries
+   - claim evidence comes from batch-summary `chunk_ids`
+   - follow-up suggestions are written to session state and output artifacts
+6. if touching follow-up filtering, confirm the saved trace records the tool calls, retrieved evidence, and grounded final answer
 
 ## Useful Commands
 
@@ -359,4 +409,26 @@ Run a follow-up query over a prior synthesized summary:
   --prior-summary-path outputs/llms_cefr_quality_query.md \
   --db-path data/lancedb \
   --output-path xoutputs/zhu_vs_uchida_differences_followup.md
+```
+
+Run an iterative `resquery` session turn:
+
+```bash
+./.venv/bin/python -m resquery.run_session \
+  "What are the weaknesses of LLMs?" \
+  --session-path ressessions/llm_weaknesses.json \
+  --db-path data/lancedb \
+  --query-output-path resoutputs/llm_weaknesses_t1_dbquery.md \
+  --output-path resoutputs/llm_weaknesses_t1_resquery.md
+```
+
+Continue the same `resquery` session with prior-claim context:
+
+```bash
+./.venv/bin/python -m resquery.run_session \
+  "How does chain of thought impact the accuracy of CEFR generated text?" \
+  --session-path ressessions/llm_weaknesses.json \
+  --db-path data/lancedb \
+  --query-output-path resoutputs/llm_weaknesses_t2_dbquery.md \
+  --output-path resoutputs/llm_weaknesses_t2_resquery.md
 ```

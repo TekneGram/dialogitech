@@ -2,6 +2,9 @@
 
 Query: What are the weaknesses of LLMs?
 Retrieval mode: full
+Candidate pool k: [default]
+Excluded chunk_ids: [none]
+Excluded paper_ids: [none]
 Rewrites: LLM limitations, Weaknesses of large language models
 HyDE enabled: yes
 HyDE text: A significant weakness of large language models lies in their propensity for generating plausible-sounding but factually incorrect information, a phenomenon commonly termed "hallucination." This stems from their training objective, which prioritizes linguistic coherence over absolute truth, meaning they can confidently assert falsehoods. Furthermore, LLMs often exhibit biases present in their vast training datasets, leading to skewed or discriminatory outputs regarding gender, race, or socioeconomic status. Another critical limitation is their lack of genuine understanding or reasoning capabilities; they operate based on statistical patterns rather than causal comprehension. Finally, the opacity of their complex neural network architecture presents challenges for interpretability, making it difficult to trace the source of a specific erroneous output.
