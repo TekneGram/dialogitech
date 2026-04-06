@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import ResearchSessionState
+from .models import ResearchBranch, ResearchSessionState
 
 
 class ResearchSessionInitializer:
@@ -14,6 +14,15 @@ class ResearchSessionInitializer:
             created_at=timestamp,
             updated_at=timestamp,
             root_query=root_query,
+            active_branch_id="b1",
+            branch_order=["b1"],
+            branches={
+                "b1": ResearchBranch(
+                    branch_id="b1",
+                    label="main",
+                    created_at=timestamp,
+                )
+            },
         )
 
     def _session_id_from_path(self, session_path: str | Path) -> str:

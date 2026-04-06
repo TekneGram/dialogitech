@@ -29,6 +29,7 @@ class QueryRequest:
     query: str
     retrieval_mode: RetrievalMode = "full"
     retrieval_depth: int = 10
+    candidate_pool_k: int | None = None
     final_top_k: int = 15
     batch_size: int = 5
     rewrite_count: int = 2
@@ -37,6 +38,8 @@ class QueryRequest:
     rrf_k: int = 60
     min_relevance_score: float | None = None
     filters: QueryFilters | None = None
+    exclude_chunk_ids: list[str] = field(default_factory=list)
+    exclude_paper_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

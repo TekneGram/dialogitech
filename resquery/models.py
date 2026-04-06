@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from dbquery.models import QueryPipelineResult, QueryRequest
+
+
+RunMode = Literal["new", "continue", "deepen", "expand"]
 
 
 @dataclass(slots=True)
@@ -13,6 +17,7 @@ class ResearchClaim:
     confidence: str
     evidence_chunk_ids: list[str] = field(default_factory=list)
     created_in_turn: str = ""
+    branch_id: str = ""
 
 
 @dataclass(slots=True)
@@ -20,6 +25,7 @@ class SuggestedFollowup:
     question_id: str
     text: str
     created_in_turn: str = ""
+    branch_id: str = ""
 
 
 @dataclass(slots=True)
@@ -55,14 +61,27 @@ class SelectedEvidence:
 @dataclass(slots=True)
 class SelectedStateView:
     root_query: str
+    branch_id: str = ""
     prior_claims: list[SelectedClaim] = field(default_factory=list)
     followup_suggestions: list[SelectedFollowup] = field(default_factory=list)
     recent_evidence: list[SelectedEvidence] = field(default_factory=list)
 
 
 @dataclass(slots=True)
+class ResearchBranch:
+    branch_id: str
+    label: str
+    created_at: str
+    turn_order: list[str] = field(default_factory=list)
+    seen_chunk_ids: list[str] = field(default_factory=list)
+    seen_paper_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ResearchTurn:
     turn_id: str
+    branch_id: str
+    run_mode: RunMode
     user_question: str
     timestamp: str
     selected_state_view: SelectedStateView
@@ -81,6 +100,9 @@ class ResearchSessionState:
     created_at: str
     updated_at: str
     root_query: str
+    active_branch_id: str = "b1"
+    branch_order: list[str] = field(default_factory=list)
+    branches: dict[str, ResearchBranch] = field(default_factory=dict)
     turn_order: list[str] = field(default_factory=list)
     turns: dict[str, ResearchTurn] = field(default_factory=dict)
     claims: dict[str, ResearchClaim] = field(default_factory=dict)
@@ -112,6 +134,9 @@ class ResQueryRequest:
     session_path: str
     user_question: str
     query_request: QueryRequest
+    run_mode: RunMode = "continue"
+    branch_id: str | None = None
+    branch_label: str | None = None
     query_output_path: str | None = None
 
 

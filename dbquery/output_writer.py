@@ -18,6 +18,15 @@ class QueryOutputWriter:
         lines.append("")
         lines.append(f"Query: {result.request.query}")
         lines.append(f"Retrieval mode: {result.request.retrieval_mode}")
+        lines.append(
+            f"Candidate pool k: {result.request.candidate_pool_k if result.request.candidate_pool_k is not None else '[default]'}"
+        )
+        lines.append(
+            f"Excluded chunk_ids: {', '.join(result.request.exclude_chunk_ids) or '[none]'}"
+        )
+        lines.append(
+            f"Excluded paper_ids: {', '.join(result.request.exclude_paper_ids) or '[none]'}"
+        )
         lines.append(f"Rewrites: {', '.join(result.rewrites)}")
         lines.append(f"HyDE enabled: {'yes' if result.hyde_text is not None else 'no'}")
         if result.hyde_text is not None:

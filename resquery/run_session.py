@@ -20,6 +20,7 @@ from dbquery.synthesis_summarizer import GemmaSynthesisSummarizer
 
 from .batch_summary_claims_extractor import GemmaBatchSummaryClaimsExtractor
 from .claim_deduper import ClaimDeduper
+from .claim_relevance_ranker import ClaimRelevanceRanker
 from .followup_suggester import GemmaFollowupSuggester
 from .models import ResQueryRequest
 from .output_writer import ResQueryOutputWriter
@@ -61,6 +62,19 @@ def main() -> None:
     parser.add_argument("--rewrite-count", type=int, default=2, help="Number of Gemma rewrites to generate.")
     parser.add_argument("--rrf-k", type=int, default=60, help="RRF smoothing constant.")
     parser.add_argument("--min-rrf-lists", type=int, default=1, help="Minimum contributing lists per chunk.")
+    parser.add_argument(
+        "--run-mode",
+        choices=("new", "continue", "deepen", "expand"),
+        default="continue",
+        help="How to handle branch context for this turn.",
+    )
+    parser.add_argument("--branch-id", help="Branch to continue/deepen/expand, or ID to create for --run-mode new.")
+    parser.add_argument("--branch-label", help="Optional label when creating a new branch.")
+    parser.add_argument(
+        "--candidate-pool-k",
+        type=int,
+        help="Optional retrieval pool size before exclusions and fusion. deepen/expand choose a larger default if unset.",
+    )
     parser.add_argument("--min-relevance-score", type=float, help="Optional LanceDB relevance score cutoff.")
     parser.add_argument("--paper-id", help="Restrict retrieval to a single paper ID.")
     parser.add_argument("--year", type=int, help="Restrict retrieval to a specific publication year.")
@@ -73,16 +87,23 @@ def main() -> None:
         help="Restrict retrieval to chunks whose author list contains this string.",
     )
     parser.add_argument("--no-hyde", action="store_true", help="Disable HyDE retrieval.")
+    parser.add_argument(
+        "--claim-similarity-threshold",
+        type=float,
+        default=0.85,
+        help="Cosine similarity threshold for filtering semantically similar claims.",
+    )
     args = parser.parse_args()
 
     gemma_client = GemmaClient(
         model_path=args.model_path,
         python_executable=args.python_executable,
     )
+    embedding_service = OllamaEmbeddingService()
     query_pipeline = QueryPipeline(
         query_rewriter=GemmaQueryRewriter(gemma_client),
         hyde_generator=GemmaHyDEGenerator(gemma_client),
-        query_embedder=QueryEmbedder(OllamaEmbeddingService()),
+        query_embedder=QueryEmbedder(embedding_service),
         retriever=LanceDBRetriever(db_path=args.db_path, table_name=args.table_name),
         result_fuser=ReciprocalRankFuser(k=args.rrf_k, min_lists=args.min_rrf_lists),
         chunk_batcher=ChunkBatcher(),
@@ -92,12 +113,17 @@ def main() -> None:
     pipeline = ResQueryPipeline(
         state_store=ResearchStateStore(),
         session_initializer=ResearchSessionInitializer(),
-        state_selector=ResearchStateSelector(),
+        state_selector=ResearchStateSelector(
+            claim_relevance_ranker=ClaimRelevanceRanker(embedding_service=embedding_service),
+        ),
         query_context_builder=QueryContextBuilder(),
         query_pipeline=query_pipeline,
         state_updater=ResearchStateUpdater(
             claims_extractor=GemmaBatchSummaryClaimsExtractor(gemma_client),
-            claim_deduper=ClaimDeduper(),
+            claim_deduper=ClaimDeduper(
+                embedding_service=embedding_service,
+                similarity_threshold=args.claim_similarity_threshold,
+            ),
             followup_suggester=GemmaFollowupSuggester(gemma_client),
         ),
         state_merger=ResearchStateMerger(),
@@ -106,6 +132,7 @@ def main() -> None:
         query=args.user_question,
         retrieval_mode=args.retrieval_mode,
         retrieval_depth=args.retrieval_depth,
+        candidate_pool_k=args.candidate_pool_k,
         final_top_k=args.final_top_k,
         batch_size=args.batch_size,
         rewrite_count=args.rewrite_count,
@@ -126,6 +153,9 @@ def main() -> None:
             session_path=args.session_path,
             user_question=args.user_question,
             query_request=query_request,
+            run_mode=args.run_mode,
+            branch_id=args.branch_id,
+            branch_label=args.branch_label,
             query_output_path=args.query_output_path,
         )
     )
@@ -139,6 +169,8 @@ def main() -> None:
 
     print(f"session_id={result.session_state.session_id}")
     print(f"turn_id={result.turn.turn_id}")
+    print(f"branch_id={result.turn.branch_id}")
+    print(f"run_mode={result.turn.run_mode}")
     print(f"session_path={result.session_path}")
     print(f"query_output_path={args.query_output_path or '[not written]'}")
     if turn_output_path is not None:

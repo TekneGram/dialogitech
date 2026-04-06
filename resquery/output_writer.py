@@ -22,11 +22,14 @@ class ResQueryOutputWriter:
         lines.append("")
         lines.append(f"Session path: {result.session_path}")
         lines.append(f"Turn: {result.turn.turn_id}")
+        lines.append(f"Branch: {result.turn.branch_id}")
+        lines.append(f"Run mode: {result.turn.run_mode}")
         lines.append(f"User question: {result.turn.user_question}")
         lines.append("")
         lines.append("## Selected Prior State")
         lines.append("")
         lines.append(f"Root query: {result.selected_state_view.root_query}")
+        lines.append(f"Selected branch: {result.selected_state_view.branch_id or '[none]'}")
         lines.append("")
         lines.append("### Prior Claims")
         lines.append("")
@@ -63,6 +66,16 @@ class ResQueryOutputWriter:
         lines.append("```text")
         lines.append(result.turn.contextualized_query)
         lines.append("```")
+        lines.append("")
+        lines.append(
+            f"Excluded chunk_ids: {', '.join(result.turn.query_request.exclude_chunk_ids) or '[none]'}"
+        )
+        lines.append(
+            f"Excluded paper_ids: {', '.join(result.turn.query_request.exclude_paper_ids) or '[none]'}"
+        )
+        lines.append(
+            f"Candidate pool k: {result.turn.query_request.candidate_pool_k or '[default]'}"
+        )
         lines.append("")
         lines.append("## dbquery Artifact")
         lines.append("")
