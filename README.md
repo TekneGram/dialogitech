@@ -30,7 +30,7 @@ ollama pull qwen3-embedding:0.6b
 - `chunker/`: core pipeline code
 - `dbquery/`: LanceDB query rewriting, retrieval, fusion, and summarization
 - `dbxquery/`: grounded follow-up querying over prior synthesized summaries
-- `resquery/`: iterative research sessions using prior claims to contextualize new `dbquery` turns
+- `resquery/`: iterative research sessions with branch-local history, exploration modes, and end-of-session synthesis
 - `marker/`: local Marker checkout and conversion outputs
 - `pdfs/`: source PDFs
 
@@ -43,7 +43,7 @@ ollama pull qwen3-embedding:0.6b
 - `dbinsert/`: LanceDB ingestion, indexing, full-pipeline orchestration, and inspection CLIs
 - `dbquery/`: query rewriting with Gemma, hybrid/vector/FTS retrieval, reciprocal-rank fusion, batch summaries, and synthesized summaries
 - `dbxquery/`: single-turn grounded follow-up planning, filtered evidence retrieval, and answer writing over prior summary outputs
-- `resquery/`: multi-turn research sessions that reuse `dbquery`, carry forward prior claims, extract new claims from batch summaries, and suggest follow-up questions
+- `resquery/`: multi-turn research sessions that reuse `dbquery`, track branch-local exploration history, extract new claims from batch summaries, suggest follow-up questions, and synthesize branch findings
 
 ## Requirements
 
@@ -394,37 +394,85 @@ For iterative multi-turn research, use the `resquery` pipeline.
   "What are the weaknesses of LLMs?" \
   --session-path ressessions/llm_weaknesses.json \
   --db-path data/lancedb \
+  --run-mode continue \
+  --branch-id b1 \
   --query-output-path resoutputs/llm_weaknesses_t1_dbquery.md \
   --output-path resoutputs/llm_weaknesses_t1_resquery.md
 ```
 
-Continue the same session with a new turn:
+Continue the same branch with a focused follow-up:
 
 ```bash
 ./.venv/bin/python -m resquery.run_session \
   "How does chain of thought impact the accuracy of CEFR generated text?" \
   --session-path ressessions/llm_weaknesses.json \
   --db-path data/lancedb \
+  --run-mode continue \
+  --branch-id b1 \
   --query-output-path resoutputs/llm_weaknesses_t2_dbquery.md \
   --output-path resoutputs/llm_weaknesses_t2_resquery.md
 ```
 
+Go deeper on the same branch while excluding already seen chunks:
+
+```bash
+./.venv/bin/python -m resquery.run_session \
+  "Explain more about why there are these limitations in generating CEFR texts." \
+  --session-path ressessions/llm_weaknesses.json \
+  --db-path data/lancedb \
+  --run-mode deepen \
+  --branch-id b1 \
+  --query-output-path resoutputs/llm_weaknesses_t3_dbquery.md \
+  --output-path resoutputs/llm_weaknesses_t3_resquery.md
+```
+
+Expand outward from the same branch while excluding already seen papers:
+
+```bash
+./.venv/bin/python -m resquery.run_session \
+  "Find adjacent literature on this question." \
+  --session-path ressessions/llm_weaknesses.json \
+  --db-path data/lancedb \
+  --run-mode expand \
+  --branch-id b1 \
+  --query-output-path resoutputs/llm_weaknesses_t4_dbquery.md \
+  --output-path resoutputs/llm_weaknesses_t4_resquery.md
+```
+
+Start a separate line of inquiry in a new branch:
+
+```bash
+./.venv/bin/python -m resquery.run_session \
+  "What are the weaknesses of LLMs in assessment design?" \
+  --session-path ressessions/llm_weaknesses.json \
+  --db-path data/lancedb \
+  --run-mode new \
+  --branch-id b2 \
+  --branch-label assessment \
+  --query-output-path resoutputs/llm_weaknesses_b2_t1_dbquery.md \
+  --output-path resoutputs/llm_weaknesses_b2_t1_resquery.md
+```
+
 The current `resquery` design does the following:
 
-1. loads the persisted research session
-2. selects prior claims, recent follow-up suggestions, and recent evidence metadata
-3. contextualizes the next `dbquery` query as:
-   - `This is what we know so far`
-   - prior claims
-   - the new user question
-4. runs `dbquery` unchanged as the retrieval and synthesis engine
+1. loads the persisted research session and branch state
+2. resolves the branch for the current turn
+3. chooses a run mode:
+   - `new`: create a new branch with empty seen-history
+   - `continue`: use the current question as-is on the selected branch
+   - `deepen`: inject compact branch context and exclude already seen `chunk_ids`
+   - `expand`: inject compact branch context and exclude already seen `paper_ids`
+4. runs `dbquery` as the retrieval and synthesis engine
 5. extracts compact claims from each individual `dbquery` batch summary
 6. attaches claim evidence programmatically from that batch summary's `chunk_ids`
-7. asks Gemma for user-facing follow-up suggestions from the new synthesized summary
-8. writes the updated session JSON and a markdown turn artifact
+7. stores branch-local seen `chunk_ids` and `paper_ids` for later `deepen` and `expand` runs
+8. asks Gemma for user-facing follow-up suggestions from the new synthesized summary
+9. writes the updated session JSON and a markdown turn artifact
 
 `resquery` stores:
 
+- branch metadata and branch-local turn order
+- branch-local seen `chunk_ids` and `paper_ids`
 - prior claims
 - follow-up suggestions
 - evidence index metadata
@@ -433,10 +481,45 @@ The current `resquery` design does the following:
 
 Important design notes:
 
+- a brand-new session starts with default branch `b1`; use `continue --branch-id b1` for the first turn, then `new` when you want an additional branch such as `b2`
 - claims come from batch summaries, not from the final synthesized summary
 - claim evidence is not generated by Gemma; it comes from known `dbquery` batch-summary `chunk_ids`
 - follow-up suggestions are suggestions for the user, not resolved/unresolved state
-- `active_focus` is not part of the current `resquery` model
+- `deepen` and `expand` use compact branch context instead of injecting the full claim history
+- for `deepen` and `expand`, branch claims are selected by semantic similarity to the current question, with status/confidence used as fallback ordering
+
+## Research Synthesis
+
+After you finish one or more `resquery` branches, synthesize them into a final report:
+
+```bash
+./.venv/bin/python -m resquery.run_synthesis \
+  --session-path ressessions/llm_weaknesses.json \
+  --output-path resoutputs/llm_weaknesses_final_report.md
+```
+
+Limit synthesis to selected branches by repeating `--branch-id`:
+
+```bash
+./.venv/bin/python -m resquery.run_synthesis \
+  --session-path ressessions/llm_weaknesses.json \
+  --branch-id b1 \
+  --branch-id b2 \
+  --output-path resoutputs/llm_weaknesses_final_report.md
+```
+
+The synthesis pipeline does the following:
+
+1. reads the saved `resquery` session state
+2. builds one branch-local synthesis input per selected branch using:
+   - ordered turn summaries
+   - claim-level evidence provenance
+3. asks Gemma for one summary per branch with provenance citations
+4. compares branch summaries pairwise and asks Gemma for similarities and points of contention
+5. writes one final markdown report containing:
+   - one section per branch summary
+   - one section per branch comparison
+   - the provenance context used for each branch summary
 
 ## Follow-up Queries
 

@@ -16,6 +16,12 @@ def main() -> None:
         help="Optional Python executable to use for MLX inference in a separate environment.",
     )
     parser.add_argument(
+        "--llm-timeout-seconds",
+        type=float,
+        default=180.0,
+        help="Maximum time to wait for each external Gemma request.",
+    )
+    parser.add_argument(
         "--force-llm",
         action="store_true",
         help="Classify all chunks with the LLM instead of only unresolved chunks.",
@@ -39,15 +45,21 @@ def main() -> None:
             heading_splits=heading_splits,
             model_path=args.model_path,
             python_executable=args.python_executable,
+            request_timeout_seconds=args.llm_timeout_seconds,
+            event_logger=lambda message: print(message, flush=True),
         )
 
-    classified = classify_filtered_markdown(
-        markdown,
-        min_words=args.min_words,
-        overlap_words=args.overlap_words,
-        llm_classifier=llm_classifier,
-        force_llm=args.force_llm,
-    )
+    try:
+        classified = classify_filtered_markdown(
+            markdown,
+            min_words=args.min_words,
+            overlap_words=args.overlap_words,
+            llm_classifier=llm_classifier,
+            force_llm=args.force_llm,
+        )
+    finally:
+        if llm_classifier is not None:
+            llm_classifier.close()
 
     total = sum(len(split.chunks) for split in classified)
     llm_count = sum(

@@ -54,6 +54,7 @@ class PdfToLancePipeline:
         model_path: str | None = None,
         python_executable: str | None = None,
         force_llm: bool = False,
+        llm_timeout_seconds: float = 180.0,
         replace_existing: bool = False,
         create_indexes: bool = True,
         rerun_marker: bool = False,
@@ -139,6 +140,7 @@ class PdfToLancePipeline:
                     heading_splits=heading_splits,
                     model_path=resolved_model_path,
                     python_executable=resolved_python_executable,
+                    request_timeout_seconds=llm_timeout_seconds,
                     event_logger=lambda message: self._emit_classification_event(
                         paper_id=paper_id,
                         message=message,
@@ -146,10 +148,13 @@ class PdfToLancePipeline:
                     ),
                 )
 
-                classified_splits = ChunkClassificationEnricher(
-                    llm_classifier=llm_classifier,
-                    force_llm=force_llm,
-                ).enrich_heading_splits(heading_splits)
+                try:
+                    classified_splits = ChunkClassificationEnricher(
+                        llm_classifier=llm_classifier,
+                        force_llm=force_llm,
+                    ).enrich_heading_splits(heading_splits)
+                finally:
+                    llm_classifier.close()
                 self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id)
                 self._write_classified_json(
                     classified_json_path=classified_json_path,

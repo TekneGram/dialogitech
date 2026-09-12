@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import queue
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -13,6 +15,134 @@ SectionLabel = Literal["abstract", "introduction", "method", "results", "discuss
 ClassificationConfidence = Literal["low", "medium", "high"]
 ArticleQuintile = Literal["first 20%", "second 20%", "third 20%", "fourth 20%", "last 20%"]
 LLMAction = Literal["classify", "request_context"]
+
+
+class _GemmaSubprocessWorker:
+    def __init__(
+        self,
+        *,
+        python_executable: str,
+        runner_path: Path,
+        model_path: str,
+        request_timeout_seconds: float,
+        event_logger: Callable[[str], None],
+    ) -> None:
+        self.request_timeout_seconds = request_timeout_seconds
+        self.event_logger = event_logger
+        self._responses: queue.Queue[str | None] = queue.Queue()
+        self._stderr_lines: list[str] = []
+        self._stderr_lock = threading.Lock()
+        self.process = subprocess.Popen(
+            [python_executable, str(runner_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        assert self.process.stdin is not None
+        assert self.process.stdout is not None
+        assert self.process.stderr is not None
+        self._stdout_thread = threading.Thread(
+            target=self._read_stdout,
+            args=(self.process.stdout,),
+            daemon=True,
+        )
+        self._stderr_thread = threading.Thread(
+            target=self._read_stderr,
+            args=(self.process.stderr,),
+            daemon=True,
+        )
+        self._stdout_thread.start()
+        self._stderr_thread.start()
+        self._send_payload(
+            {
+                "model_path": model_path,
+                "messages": [],
+                "max_tokens": 1,
+                "temperature": 0.0,
+            },
+            initialization=True,
+        )
+
+    def generate(self, *, messages: list[dict[str, str]], max_tokens: int, temperature: float) -> str:
+        self._send_payload(
+            {
+                "model_path": "",
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+        )
+        try:
+            response_line = self._responses.get(timeout=self.request_timeout_seconds)
+        except queue.Empty as exc:
+            self.close()
+            raise RuntimeError(
+                f"Gemma request timed out after {self.request_timeout_seconds:g} seconds. "
+                f"Recent stderr: {self._recent_stderr()}"
+            ) from exc
+
+        if response_line is None:
+            returncode = self.process.poll()
+            self.close()
+            raise RuntimeError(
+                f"External MLX runner exited before responding (exit code {returncode}). "
+                f"Recent stderr: {self._recent_stderr()}"
+            )
+
+        try:
+            payload = json.loads(response_line)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"External MLX runner returned invalid JSON: {response_line!r}") from exc
+        if payload.get("error"):
+            raise RuntimeError(f"External MLX runner error: {payload['error']}")
+        response = payload.get("response")
+        if not isinstance(response, str) or not response.strip():
+            raise RuntimeError("External MLX runner returned an empty response.")
+        return response.strip()
+
+    def _send_payload(self, payload: dict[str, object], *, initialization: bool = False) -> None:
+        if self.process.poll() is not None:
+            raise RuntimeError(
+                f"External MLX runner exited with code {self.process.returncode}. "
+                f"Recent stderr: {self._recent_stderr()}"
+            )
+        assert self.process.stdin is not None
+        if initialization:
+            # The first request makes the worker load the model. It intentionally
+            # performs no generation; the worker consumes it before normal calls.
+            payload["initialize_only"] = True
+        self.process.stdin.write(json.dumps(payload) + "\n")
+        self.process.stdin.flush()
+
+    def _read_stdout(self, stream: Any) -> None:
+        for line in stream:
+            self._responses.put(line.rstrip("\n"))
+        self._responses.put(None)
+
+    def _read_stderr(self, stream: Any) -> None:
+        for line in stream:
+            clean_line = line.rstrip("\n")
+            with self._stderr_lock:
+                self._stderr_lines.append(clean_line)
+                del self._stderr_lines[:-20]
+            self.event_logger(f"Gemma worker: {clean_line}")
+
+    def _recent_stderr(self) -> str:
+        with self._stderr_lock:
+            return " | ".join(self._stderr_lines[-5:]) or "no stderr output"
+
+    def close(self) -> None:
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        if self.process.stdin is not None:
+            self.process.stdin.close()
 
 
 @dataclass(slots=True)
@@ -102,6 +232,7 @@ or
         max_tokens: int | None = None,
         temperature: float = 0.0,
         python_executable: str | Path | None = None,
+        request_timeout_seconds: float = 180.0,
         event_logger: Callable[[str], None] | None = None,
     ) -> None:
         self.filtered_markdown = filtered_markdown
@@ -110,14 +241,29 @@ or
         self.max_tokens = max_tokens or self.MODEL_MAX_TOKENS
         self.temperature = temperature
         self.python_executable = str(python_executable) if python_executable is not None else None
+        if request_timeout_seconds <= 0:
+            raise ValueError("request_timeout_seconds must be positive.")
+        self.request_timeout_seconds = request_timeout_seconds
         self.event_logger = event_logger
         self._model: Any = None
         self._tokenizer: Any = None
+        self._worker: _GemmaSubprocessWorker | None = None
         self._section_ranges = self._build_section_ranges(filtered_markdown, heading_splits)
         self._chunk_locations = self._build_chunk_locations(filtered_markdown, heading_splits, self._section_ranges)
 
     def classify(self, chunk: SectionChunk, heading_split: HeadingSplit) -> ChunkClassification:
         return self.classify_with_previous_label(chunk=chunk, heading_split=heading_split, previous_label=None)
+
+    def close(self) -> None:
+        if self._worker is not None:
+            self._worker.close()
+            self._worker = None
+
+    def __enter__(self) -> "ChunkClassificationLLM":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.close()
 
     def classify_with_previous_label(
         self,
@@ -329,31 +475,25 @@ or
         return response.strip()
 
     def _generate_via_subprocess(self, messages: list[dict[str, str]]) -> str:
-        runner_path = Path(__file__).with_name("mlx_llm_runner.py")
-        payload = {
-            "model_path": self.model_path,
-            "messages": messages,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-        }
-        completed = subprocess.run(
-            [self.python_executable, str(runner_path)],
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip()
-            raise RuntimeError(
-                f"External MLX runner failed with exit code {completed.returncode}: {stderr or 'no stderr output'}"
+        if self._worker is None:
+            runner_path = Path(__file__).with_name("mlx_llm_runner.py")
+            self._worker = _GemmaSubprocessWorker(
+                python_executable=self.python_executable,
+                runner_path=runner_path,
+                model_path=self.model_path,
+                request_timeout_seconds=self.request_timeout_seconds,
+                event_logger=self._log_event,
             )
-
-        response = completed.stdout.strip()
-        if not response:
-            raise RuntimeError("External MLX runner returned empty output.")
-        return response
+        try:
+            return self._worker.generate(
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+        except RuntimeError:
+            self._worker.close()
+            self._worker = None
+            raise
 
     def _fallback_chat_prompt(self, messages: list[dict[str, str]]) -> str:
         rendered: list[str] = []
