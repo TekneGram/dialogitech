@@ -44,12 +44,36 @@ class GemmaClient:
                 f"External MLX runner failed with exit code {completed.returncode}: {stderr or 'no stderr output'}"
             )
 
-        response = completed.stdout.strip()
-        if not response:
+        raw_response = completed.stdout.strip()
+        if not raw_response:
             raise RuntimeError("External MLX runner returned empty output.")
 
+        response = self._extract_runner_response(raw_response)
         self._log_event(f"Gemma raw response: {self._truncate_for_log(response)}")
         return response
+
+    def _extract_runner_response(self, raw_response: str) -> str:
+        """Unwrap the JSON line protocol used by ``mlx_llm_runner``.
+
+        Older external runners may return plain model text, so preserve that
+        behavior when stdout is not a runner envelope.
+        """
+        try:
+            payload = json.loads(raw_response)
+        except json.JSONDecodeError:
+            return raw_response
+
+        if not isinstance(payload, dict):
+            return raw_response
+        if "error" in payload:
+            raise RuntimeError(f"External MLX runner failed: {payload['error']}")
+        if "response" not in payload:
+            return raw_response
+
+        response = payload["response"]
+        if not isinstance(response, str) or not response.strip():
+            raise RuntimeError("External MLX runner returned an empty response.")
+        return response.strip()
 
     def _log_event(self, message: str) -> None:
         if self.event_logger is not None:

@@ -26,7 +26,7 @@ from .pipeline_loader import load_classified_heading_splits
 
 
 DEFAULT_GEMMA_MODEL_PATH = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
-DEFAULT_GEMMA_PYTHON = "/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python"
+DEFAULT_GEMMA_PYTHON = str(Path.home() / ".unsloth" / "unsloth_gemma4_mlx" / "bin" / "python")
 MARKER_PROGRESS_INTERVALS = (60, 180, 300)
 MARKER_PROGRESS_REPEAT_SECONDS = 300
 

@@ -16,7 +16,7 @@ from .plan_validator import EvidencePlanValidator
 from .utils import PriorSummaryExtractor
 
 DEFAULT_GEMMA_MODEL = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
-DEFAULT_GEMMA_PYTHON = "/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python"
+DEFAULT_GEMMA_PYTHON = str(Path.home() / ".unsloth" / "unsloth_gemma4_mlx" / "bin" / "python")
 
 
 def main() -> None:

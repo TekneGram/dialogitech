@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from dbinsert.embedding_service import OllamaEmbeddingService
 from dbinsert.lancedb_schema import DEFAULT_TABLE_NAME
@@ -33,7 +34,7 @@ from .state_store import ResearchStateStore
 from .state_updater import ResearchStateUpdater
 
 DEFAULT_GEMMA_MODEL = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
-DEFAULT_GEMMA_PYTHON = "/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python"
+DEFAULT_GEMMA_PYTHON = str(Path.home() / ".unsloth" / "unsloth_gemma4_mlx" / "bin" / "python")
 
 
 def main() -> None:
