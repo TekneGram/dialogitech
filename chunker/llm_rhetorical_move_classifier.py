@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .llm_section_classifier import ChunkClassificationLLM, ChunkContext, ChunkLocation
+from .paper_type_classifier import PaperType
 from .rhetorical_move_classifier import (
     ClassificationConfidence,
     RhetoricalMoveClassification,
@@ -54,11 +55,21 @@ JSON schema:
             event_logger=event_logger,
         )
 
-    def classify(self, *, chunk: Any, heading_split: Any, section_label: SectionLabel) -> RhetoricalMoveResult:
+    def classify(
+        self,
+        *,
+        chunk: Any,
+        heading_split: Any,
+        section_label: SectionLabel,
+        paper_type: PaperType = "empirical_research",
+    ) -> RhetoricalMoveResult:
+        RhetoricalMoveEnricher.validate_section_for_paper_type(section_label, paper_type=paper_type)
         allowed_moves = RhetoricalMoveEnricher.allowed_moves(section_label)
         location = self._chunk_location(chunk, heading_split)
         chunk_ref = self._chunk_ref(chunk=chunk, heading_split=heading_split)
-        initial_prompt = self._initial_prompt(chunk, heading_split, section_label, location, allowed_moves)
+        initial_prompt = self._initial_prompt(
+            chunk, heading_split, paper_type, section_label, location, allowed_moves
+        )
         used_context = False
         try:
             self._log_event(f"{chunk_ref} sending rhetorical-move request (section={section_label}).")
@@ -75,6 +86,7 @@ JSON schema:
                     invalid_response=response,
                     failure=exc,
                     section_label=section_label,
+                    paper_type=paper_type,
                     allowed_moves=allowed_moves,
                     used_context=used_context,
                 )
@@ -82,7 +94,7 @@ JSON schema:
                 used_context = True
                 context = self._context_for_chunk(chunk, heading_split)
                 context_prompt = self._context_prompt(
-                    chunk, heading_split, section_label, location, allowed_moves, context
+                    chunk, heading_split, paper_type, section_label, location, allowed_moves, context
                 )
                 self._log_event(f"{chunk_ref} requested rhetorical-move context; sending one context round.")
                 response = self._generate([
@@ -102,19 +114,26 @@ JSON schema:
                         invalid_response=response,
                         failure=exc,
                         section_label=section_label,
+                        paper_type=paper_type,
                         allowed_moves=allowed_moves,
                         used_context=used_context,
                     )
                 if payload.get("action") == "request_context":
                     raise RuntimeError("Model requested rhetorical-move context after the single allowed context round.")
             try:
-                return self._result_from_payload(payload, section_label=section_label, used_context=used_context)
+                return self._result_from_payload(
+                    payload,
+                    section_label=section_label,
+                    paper_type=paper_type,
+                    used_context=used_context,
+                )
             except RuntimeError as exc:
                 return self._correct_invalid_response(
                     chunk_ref=chunk_ref,
                     invalid_response=response,
                     failure=exc,
                     section_label=section_label,
+                    paper_type=paper_type,
                     allowed_moves=allowed_moves,
                     used_context=used_context,
                 )
@@ -123,11 +142,12 @@ JSON schema:
             raise RuntimeError(f"{chunk_ref} Gemma failed to classify rhetorical moves: {exc}") from exc
 
     def _initial_prompt(
-        self, chunk: Any, heading_split: Any, section_label: SectionLabel,
+        self, chunk: Any, heading_split: Any, paper_type: PaperType, section_label: SectionLabel,
         location: ChunkLocation, allowed_moves: tuple[str, ...],
     ) -> str:
         return "\n".join([
             "This chunk has already been classified into a paper section.",
+            f"Paper type: {paper_type}",
             f"Section classification: {section_label}",
             f"Heading: {heading_split.title}",
             f"Article position: {location.quintile}",
@@ -139,11 +159,12 @@ JSON schema:
         ])
 
     def _context_prompt(
-        self, chunk: Any, heading_split: Any, section_label: SectionLabel,
+        self, chunk: Any, heading_split: Any, paper_type: PaperType, section_label: SectionLabel,
         location: ChunkLocation, allowed_moves: tuple[str, ...], context: ChunkContext,
     ) -> str:
         return "\n".join([
             "Context requested. You must now return the final rhetorical-move JSON object.",
+            f"Paper type: {paper_type}",
             f"Section classification: {section_label}", f"Heading: {heading_split.title}",
             f"Article position: {location.quintile}", "Allowed rhetorical moves:",
             *[f"- {label}" for label in allowed_moves],
@@ -180,12 +201,14 @@ JSON schema:
         invalid_response: str,
         failure: RuntimeError,
         section_label: SectionLabel,
+        paper_type: PaperType,
         allowed_moves: tuple[str, ...],
         used_context: bool,
     ) -> RhetoricalMoveResult:
         self._log_event(f"{chunk_ref} invalid rhetorical-move response; sending one correction prompt: {failure}")
         correction_prompt = "\n".join([
             "Your previous rhetorical-move response was invalid.",
+            f"Paper type: {paper_type}",
             f"Section classification: {section_label}",
             "Allowed rhetorical moves:",
             *[f"- {label}" for label in allowed_moves],
@@ -202,10 +225,20 @@ JSON schema:
         payload = self._parse_payload(corrected_response)
         if payload.get("action") == "request_context":
             raise RuntimeError("Model requested context in its rhetorical-move correction response.")
-        return self._result_from_payload(payload, section_label=section_label, used_context=used_context)
+        return self._result_from_payload(
+            payload,
+            section_label=section_label,
+            paper_type=paper_type,
+            used_context=used_context,
+        )
 
     def _result_from_payload(
-        self, payload: dict[str, Any], *, section_label: SectionLabel, used_context: bool,
+        self,
+        payload: dict[str, Any],
+        *,
+        section_label: SectionLabel,
+        paper_type: PaperType = "empirical_research",
+        used_context: bool,
     ) -> RhetoricalMoveResult:
         if payload.get("action") == "request_context":
             return RhetoricalMoveResult(reason=str(payload.get("reason") or "context requested"))
@@ -214,6 +247,7 @@ JSON schema:
             raise RuntimeError("Rhetorical-move response must contain a moves list.")
         if len(moves_payload) > 3:
             raise RuntimeError("Rhetorical-move response contains more than three moves.")
+        RhetoricalMoveEnricher.validate_section_for_paper_type(section_label, paper_type=paper_type)
         allowed = set(RhetoricalMoveEnricher.allowed_moves(section_label))
         moves: list[RhetoricalMoveClassification] = []
         for item in moves_payload:

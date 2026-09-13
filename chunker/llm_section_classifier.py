@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .markdown_section_chunker import HeadingSplit, SectionChunk
+from .paper_type_classifier import PaperType
+from .section_taxonomy import SECTION_LABEL_DESCRIPTIONS, SectionLabel, allowed_sections
 
-SectionLabel = Literal["abstract", "introduction", "method", "results", "discussion"]
 ClassificationConfidence = Literal["low", "medium", "high"]
 ArticleQuintile = Literal["first 20%", "second 20%", "third 20%", "fourth 20%", "last 20%"]
 LLMAction = Literal["classify", "request_context"]
@@ -198,14 +199,7 @@ def article_quintile(article_start: int, article_end: int, article_length: int) 
 
 class ChunkClassificationLLM:
     MODEL_MAX_TOKENS = 220
-    SYSTEM_PROMPT = """You classify chunks from academic articles.
-
-Allowed labels:
-- abstract
-- introduction
-- method
-- results
-- discussion
+    SYSTEM_PROMPT = """You classify chunks from academic papers into the allowed section labels supplied by the user.
 
 Rules:
 - Return JSON only.
@@ -221,7 +215,6 @@ or
 """
 
     JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
-    LABELS: tuple[SectionLabel, ...] = ("abstract", "introduction", "method", "results", "discussion")
     CONFIDENCE_LEVELS: tuple[ClassificationConfidence, ...] = ("low", "medium", "high")
 
     def __init__(
@@ -251,8 +244,18 @@ or
         self._section_ranges = self._build_section_ranges(filtered_markdown, heading_splits)
         self._chunk_locations = self._build_chunk_locations(filtered_markdown, heading_splits, self._section_ranges)
 
-    def classify(self, chunk: SectionChunk, heading_split: HeadingSplit) -> ChunkClassification:
-        return self.classify_with_previous_label(chunk=chunk, heading_split=heading_split, previous_label=None)
+    def classify(
+        self,
+        chunk: SectionChunk,
+        heading_split: HeadingSplit,
+        paper_type: PaperType = "empirical_research",
+    ) -> ChunkClassification:
+        return self.classify_with_previous_label(
+            chunk=chunk,
+            heading_split=heading_split,
+            previous_label=None,
+            paper_type=paper_type,
+        )
 
     def close(self) -> None:
         if self._worker is not None:
@@ -271,10 +274,18 @@ or
         chunk: SectionChunk,
         heading_split: HeadingSplit,
         previous_label: SectionLabel | None,
+        paper_type: PaperType = "empirical_research",
     ) -> ChunkClassification:
         chunk_location = self._chunk_location(chunk, heading_split)
         chunk_ref = self._chunk_ref(chunk=chunk, heading_split=heading_split)
-        initial_prompt = self._initial_user_prompt(chunk, heading_split, chunk_location)
+        allowed_labels = allowed_sections(paper_type)
+        initial_prompt = self._initial_user_prompt(
+            chunk,
+            heading_split,
+            chunk_location,
+            paper_type,
+            allowed_labels,
+        )
         used_context = False
 
         try:
@@ -291,12 +302,23 @@ or
             self._log_event(
                 f"{chunk_ref} received initial response: {self._truncate_for_log(initial_response)}"
             )
-            initial_decision = self._parse_decision(initial_response, allow_request_context=True)
+            initial_decision = self._parse_decision(
+                initial_response,
+                allow_request_context=True,
+                allowed_labels=allowed_labels,
+            )
 
             if initial_decision.action == "request_context":
                 used_context = True
                 context = self._context_for_chunk(chunk, heading_split)
-                context_prompt = self._context_user_prompt(chunk, heading_split, chunk_location, context)
+                context_prompt = self._context_user_prompt(
+                    chunk,
+                    heading_split,
+                    chunk_location,
+                    context,
+                    paper_type,
+                    allowed_labels,
+                )
                 self._log_event(f"{chunk_ref} requested context; sending one context round.")
                 final_response = self._generate(
                     messages=[
@@ -310,7 +332,11 @@ or
                     f"{chunk_ref} received final response after context: "
                     f"{self._truncate_for_log(final_response)}"
                 )
-                final_decision = self._parse_decision(final_response, allow_request_context=True)
+                final_decision = self._parse_decision(
+                    final_response,
+                    allow_request_context=True,
+                    allowed_labels=allowed_labels,
+                )
                 if final_decision.action == "request_context":
                     if previous_label is None:
                         raise RuntimeError("Model requested context after the single allowed retrieval round.")
@@ -319,6 +345,8 @@ or
                         heading_split=heading_split,
                         chunk_location=chunk_location,
                         previous_label=previous_label,
+                        paper_type=paper_type,
+                        allowed_labels=allowed_labels,
                     )
                     self._log_event(
                         f"{chunk_ref} requested context again; sending previous-label confirmation "
@@ -338,7 +366,11 @@ or
                         f"{chunk_ref} received previous-label confirmation response: "
                         f"{self._truncate_for_log(confirmation_response)}"
                     )
-                    final_decision = self._parse_decision(confirmation_response, allow_request_context=False)
+                    final_decision = self._parse_decision(
+                        confirmation_response,
+                        allow_request_context=False,
+                        allowed_labels=allowed_labels,
+                    )
                 return ChunkClassification(
                     label=final_decision.label,
                     source="llm",
@@ -369,10 +401,15 @@ or
         chunk: SectionChunk,
         heading_split: HeadingSplit,
         chunk_location: ChunkLocation,
+        paper_type: PaperType,
+        allowed_labels: tuple[SectionLabel, ...],
     ) -> str:
         return "\n".join(
             [
                 "This chunk is from an academic article.",
+                f"Paper type: {paper_type}",
+                "Allowed section labels:",
+                *[f"- {label}: {SECTION_LABEL_DESCRIPTIONS[label]}" for label in allowed_labels],
                 f"Heading: {heading_split.title}",
                 f"Article position: {chunk_location.quintile}",
                 "Decide whether the chunk should be labeled as one of the allowed labels.",
@@ -388,12 +425,17 @@ or
         heading_split: HeadingSplit,
         chunk_location: ChunkLocation,
         context: ChunkContext,
+        paper_type: PaperType,
+        allowed_labels: tuple[SectionLabel, ...],
     ) -> str:
         previous_section = context.previous_section or "[no previous heading section]"
         next_section = context.next_section or "[no next heading section]"
         return "\n".join(
             [
                 "Context requested. You must now make a final classification.",
+                f"Paper type: {paper_type}",
+                "Allowed section labels:",
+                *[f"- {label}: {SECTION_LABEL_DESCRIPTIONS[label]}" for label in allowed_labels],
                 f"Heading: {heading_split.title}",
                 f"Article position: {chunk_location.quintile}",
                 "Previous heading section:",
@@ -413,10 +455,15 @@ or
         heading_split: HeadingSplit,
         chunk_location: ChunkLocation,
         previous_label: SectionLabel,
+        paper_type: PaperType,
+        allowed_labels: tuple[SectionLabel, ...],
     ) -> str:
         return "\n".join(
             [
                 "You must now return a final classification.",
+                f"Paper type: {paper_type}",
+                "Allowed section labels:",
+                *[f"- {label}: {SECTION_LABEL_DESCRIPTIONS[label]}" for label in allowed_labels],
                 f"Heading: {heading_split.title}",
                 f"Article position: {chunk_location.quintile}",
                 f"The previous chunk was classified as: {previous_label}",
@@ -543,7 +590,12 @@ or
             needs_llm=False,
         )
 
-    def _parse_decision(self, raw_response: str, allow_request_context: bool) -> LLMDecision:
+    def _parse_decision(
+        self,
+        raw_response: str,
+        allow_request_context: bool,
+        allowed_labels: tuple[SectionLabel, ...],
+    ) -> LLMDecision:
         try:
             payload = self._parse_json_object(raw_response)
         except ValueError as exc:
@@ -553,7 +605,7 @@ or
         label = self._normalize_optional_string(payload.get("label"))
         confidence = self._normalize_optional_string(payload.get("confidence"))
 
-        if action in self.LABELS:
+        if action in allowed_labels:
             if label is None:
                 label = action
             action = "classify"
@@ -568,7 +620,7 @@ or
                 raise RuntimeError("Model requested context after the single allowed retrieval round.")
             return LLMDecision(action="request_context", reason=reason)
 
-        if label not in self.LABELS:
+        if label not in allowed_labels:
             raise RuntimeError(f"Model returned unsupported label: {label!r}")
 
         if confidence not in self.CONFIDENCE_LEVELS:

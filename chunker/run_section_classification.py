@@ -4,12 +4,19 @@ import argparse
 from pathlib import Path
 
 from .llm_section_classifier import ChunkClassificationLLM
+from .paper_type_classifier import PAPER_TYPES
 from .section_classifier import classify_filtered_markdown
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run section classification on filtered markdown.")
     parser.add_argument("markdown_path", help="Path to a filtered markdown file.")
+    parser.add_argument(
+        "--paper-type",
+        choices=PAPER_TYPES,
+        default="empirical_research",
+        help="Resolved document type used to constrain the allowed section labels.",
+    )
     parser.add_argument("--model-path", help="Path to a local MLX model for LLM classification.")
     parser.add_argument(
         "--python-executable",
@@ -56,6 +63,7 @@ def main() -> None:
             overlap_words=args.overlap_words,
             llm_classifier=llm_classifier,
             force_llm=args.force_llm,
+            paper_type=args.paper_type,
         )
     finally:
         if llm_classifier is not None:
@@ -67,6 +75,7 @@ def main() -> None:
     )
 
     print(f"total_chunks={total}")
+    print(f"paper_type={args.paper_type}")
     print(f"llm_classified_chunks={llm_count}")
     for split in classified:
         for chunk in split.chunks:

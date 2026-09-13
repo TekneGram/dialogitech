@@ -6,9 +6,10 @@ from typing import Literal
 
 from .llm_section_classifier import ChunkClassificationLLM
 from .markdown_section_chunker import HeadingSplit, MarkdownSectionChunker, SectionChunk
+from .paper_type_classifier import PaperType
 from .rhetorical_move_classifier import RhetoricalMoveResult
+from .section_taxonomy import SectionLabel, allowed_sections, heading_label
 
-SectionLabel = Literal["abstract", "introduction", "method", "results", "discussion"]
 ClassificationSource = Literal["deterministic", "llm"]
 ClassificationConfidence = Literal["low", "medium", "high"]
 
@@ -48,87 +49,32 @@ class DeterministicSectionClassifier:
     SPACE_PATTERN = re.compile(r"\s+")
     CEFR_LEVEL_TITLE_PATTERN = re.compile(r"^[abc]\d(?:\.\d+)?$", re.IGNORECASE)
 
-    TITLE_RULES: tuple[tuple[set[str], SectionLabel, str], ...] = (
-        ({"abstract"}, "abstract", "heading matched abstract"),
-        (
-            {"introduction", "background", "related work", "literature review"},
-            "introduction",
-            "heading matched introduction/background family",
-        ),
-        (
-            {
-                "method",
-                "methods",
-                "methodology",
-                "materials and methods",
-                "experimental setup",
-                "experiment",
-                "experiments",
-                "procedure",
-                "procedures",
-                "participants",
-                "materials",
-                "data",
-                "data collection",
-                "corpus",
-                "text generation using chatgpt",
-                "vocabulary level analysis using software",
-                "topic analysis method",
-                "seed demonstration collection",
-            },
-            "method",
-            "heading matched method/experiment family",
-        ),
-        (
-            {
-                "result",
-                "results",
-                "finding",
-                "findings",
-                "analysis",
-                "analyses",
-                "evaluation",
-                "evaluations",
-                "topic frequency",
-            },
-            "results",
-            "heading matched results/analysis/evaluation family",
-        ),
-        (
-            {
-                "discussion",
-                "conclusion",
-                "conclusions",
-                "limitations",
-                "implications",
-                "future directions",
-            },
-            "discussion",
-            "heading matched discussion/conclusion family",
-        ),
-    )
-
     def classify(
         self,
         chunk: SectionChunk,
         heading_split: HeadingSplit,
+        paper_type: PaperType = "empirical_research",
         parent_label: SectionLabel | None = None,
         previous_label: SectionLabel | None = None,
     ) -> ChunkClassification:
         normalized_title = self._normalize_title(heading_split.title or chunk.title)
 
-        for titles, label, reason in self.TITLE_RULES:
-            if normalized_title in titles:
-                return ChunkClassification(
-                    label=label,
-                    source="deterministic",
-                    reason=reason,
-                    confidence="high",
-                    used_context=False,
-                    needs_llm=False,
-                )
+        resolved_heading_label = heading_label(paper_type, normalized_title)
+        if resolved_heading_label is not None:
+            return ChunkClassification(
+                label=resolved_heading_label,
+                source="deterministic",
+                reason=f"heading matched {paper_type} section taxonomy",
+                confidence="high",
+                used_context=False,
+                needs_llm=False,
+            )
 
-        if heading_split.heading_level > 1 and parent_label is not None:
+        if (
+            heading_split.heading_level > 1
+            and parent_label is not None
+            and parent_label in allowed_sections(paper_type)
+        ):
             return ChunkClassification(
                 label=parent_label,
                 source="deterministic",
@@ -138,7 +84,11 @@ class DeterministicSectionClassifier:
                 needs_llm=False,
             )
 
-        if previous_label is not None and self._should_inherit_from_previous(normalized_title):
+        if (
+            previous_label is not None
+            and previous_label in allowed_sections(paper_type)
+            and self._should_inherit_from_previous(normalized_title)
+        ):
             return ChunkClassification(
                 label=previous_label,
                 source="deterministic",
@@ -177,7 +127,12 @@ class ChunkClassificationEnricher:
         self.llm_classifier = llm_classifier
         self.force_llm = force_llm
 
-    def enrich_heading_splits(self, heading_splits: list[HeadingSplit]) -> list[ClassifiedHeadingSplit]:
+    def enrich_heading_splits(
+        self,
+        heading_splits: list[HeadingSplit],
+        *,
+        paper_type: PaperType = "empirical_research",
+    ) -> list[ClassifiedHeadingSplit]:
         enriched: list[ClassifiedHeadingSplit] = []
         current_top_level_label: SectionLabel | None = None
         previous_resolved_label: SectionLabel | None = None
@@ -193,6 +148,7 @@ class ChunkClassificationEnricher:
                         chunk=chunk,
                         heading_split=heading_split,
                         previous_label=previous_resolved_label,
+                        paper_type=paper_type,
                     )
                 else:
                     classification = self.deterministic_classifier.classify(
@@ -200,12 +156,14 @@ class ChunkClassificationEnricher:
                         heading_split=heading_split,
                         parent_label=parent_label,
                         previous_label=previous_resolved_label,
+                        paper_type=paper_type,
                     )
                     if classification.needs_llm and self.llm_classifier is not None:
                         classification = self.llm_classifier.classify_with_previous_label(
                             chunk=chunk,
                             heading_split=heading_split,
                             previous_label=previous_resolved_label,
+                            paper_type=paper_type,
                         )
 
                 classified_chunks.append(
@@ -250,7 +208,8 @@ def classify_filtered_markdown(
     overlap_words: int = 50,
     llm_classifier: ChunkClassificationLLM | None = None,
     force_llm: bool = False,
+    paper_type: PaperType = "empirical_research",
 ) -> list[ClassifiedHeadingSplit]:
     heading_splits = MarkdownSectionChunker(min_words=min_words, overlap_words=overlap_words).process(filtered_markdown)
     enricher = ChunkClassificationEnricher(llm_classifier=llm_classifier, force_llm=force_llm)
-    return enricher.enrich_heading_splits(heading_splits)
+    return enricher.enrich_heading_splits(heading_splits, paper_type=paper_type)
