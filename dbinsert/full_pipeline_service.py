@@ -13,6 +13,8 @@ from chunker.boilerplate_filter import BoilerplateFilter
 from chunker.llm_section_classifier import ChunkClassificationLLM
 from chunker.markdown_section_chunker import MarkdownSectionChunker
 from chunker.metadata_extractor import MetadataExtractor
+from chunker.llm_rhetorical_move_classifier import RhetoricalMoveClassificationLLM
+from chunker.rhetorical_move_classifier import RhetoricalMoveEnricher
 from chunker.section_classifier import ChunkClassificationEnricher, ClassifiedHeadingSplit
 
 from .ingest_service import ChunkIngestionService
@@ -60,6 +62,7 @@ class PdfToLancePipeline:
         rerun_marker: bool = False,
         rerun_filtered_markdown: bool = False,
         rerun_classification: bool = False,
+        rerun_rhetorical_moves: bool = False,
     ) -> dict[str, Any]:
         pdf_path = Path(pdf_path)
         if not pdf_path.exists():
@@ -116,14 +119,15 @@ class PdfToLancePipeline:
             self._emit_stage(f"[{paper_id}] Reusing existing filtered markdown: {filtered_markdown_path}")
             filtered_markdown = filtered_markdown_path.read_text(encoding="utf-8")
 
-        if self._can_reuse_classified_json(
+        reuse_classification = self._can_reuse_classified_json(
             classified_json_path=classified_json_path,
             filtered_markdown_path=filtered_markdown_path,
             model_path=resolved_model_path,
             python_executable=resolved_python_executable,
             force_llm=force_llm,
             rerun_classification=rerun_classification,
-        ):
+        )
+        if reuse_classification:
             self._emit_stage(f"[{paper_id}] Reusing existing classified chunks: {classified_json_path}")
             classified_splits, _ = load_classified_heading_splits(classified_json_path)
         else:
@@ -155,17 +159,37 @@ class PdfToLancePipeline:
                     ).enrich_heading_splits(heading_splits)
                 finally:
                     llm_classifier.close()
-                self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id)
-                self._write_classified_json(
-                    classified_json_path=classified_json_path,
-                    classified_splits=classified_splits,
-                    source_markdown=filtered_markdown_path,
+        self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id)
+        if rerun_rhetorical_moves or not self._has_rhetorical_moves(classified_splits):
+            self._emit_stage(f"[{paper_id}] Classifying rhetorical moves.")
+            with classification_log_path.open("a", encoding="utf-8") as classification_log:
+                rhetorical_classifier = RhetoricalMoveClassificationLLM(
+                    filtered_markdown=filtered_markdown,
+                    heading_splits=classified_splits,
                     model_path=resolved_model_path,
                     python_executable=resolved_python_executable,
-                    force_llm=force_llm,
+                    request_timeout_seconds=llm_timeout_seconds,
+                    event_logger=lambda message: self._emit_classification_event(
+                        paper_id=paper_id,
+                        message=f"rhetorical moves: {message}",
+                        log_file=classification_log,
+                    ),
                 )
-
-        self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id)
+                try:
+                    RhetoricalMoveEnricher(rhetorical_classifier).enrich_heading_splits(classified_splits)
+                finally:
+                    rhetorical_classifier.close()
+            self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id)
+            self._write_classified_json(
+                classified_json_path=classified_json_path,
+                classified_splits=classified_splits,
+                source_markdown=filtered_markdown_path,
+                model_path=resolved_model_path,
+                python_executable=resolved_python_executable,
+                force_llm=force_llm,
+            )
+        else:
+            self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id)
 
         paper_metadata = self._build_paper_metadata(
             paper_id=paper_id,
@@ -482,3 +506,36 @@ class PdfToLancePipeline:
                 if classification.get("needs_llm") or classification.get("label") is None:
                     return True
         return False
+
+    def _has_rhetorical_moves(self, classified_splits: list[ClassifiedHeadingSplit]) -> bool:
+        return all(
+            chunk.rhetorical_move_result is not None
+            for split in classified_splits
+            for chunk in split.chunks
+        )
+
+    def _ensure_all_rhetorical_moves_resolved(
+        self,
+        classified_splits: list[ClassifiedHeadingSplit],
+        *,
+        paper_id: str,
+    ) -> None:
+        missing = [
+            f"{split.title} [chunk {chunk.chunk_index}]"
+            for split in classified_splits
+            for chunk in split.chunks
+            if chunk.rhetorical_move_result is None
+        ]
+        if missing:
+            raise RuntimeError(
+                f"[{paper_id}] Rhetorical move classification left unresolved chunks. "
+                f"Refusing to write incomplete data to LanceDB.\n" + "\n".join(missing[:10])
+            )
+        for split in classified_splits:
+            for chunk in split.chunks:
+                assert chunk.rhetorical_move_result is not None
+                assert chunk.classification.label is not None
+                RhetoricalMoveEnricher.validate_result(
+                    chunk.rhetorical_move_result,
+                    section_label=chunk.classification.label,
+                )

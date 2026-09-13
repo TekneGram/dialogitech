@@ -48,6 +48,10 @@ class ChunkRecord:
     classification_confidence: ClassificationConfidence | None
     used_context: bool
     reason: str
+    rhetorical_moves: list[dict[str, str]]
+    rhetorical_move_source: str | None
+    rhetorical_move_used_context: bool
+    rhetorical_move_reason: str | None
     markdown_path: str | None = None
     marker_json_path: str | None = None
     pdf_path: str | None = None
@@ -76,6 +80,10 @@ class EmbeddedChunkRecord:
     classification_confidence: ClassificationConfidence | None
     used_context: bool
     reason: str
+    rhetorical_moves: list[dict[str, str]]
+    rhetorical_move_source: str | None
+    rhetorical_move_used_context: bool
+    rhetorical_move_reason: str | None
     embedding: list[float]
     markdown_path: str | None = None
     marker_json_path: str | None = None

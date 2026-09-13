@@ -22,6 +22,14 @@ from .section_classifier import (
     DeterministicSectionClassifier,
     classify_filtered_markdown,
 )
+from .llm_rhetorical_move_classifier import RhetoricalMoveClassificationLLM
+from .rhetorical_move_classifier import (
+    ALL_RHETORICAL_MOVES,
+    SECTION_ALLOWED_MOVES,
+    RhetoricalMoveClassification,
+    RhetoricalMoveEnricher,
+    RhetoricalMoveResult,
+)
 
 __all__ = [
     "ArticleQuintile",
@@ -40,6 +48,12 @@ __all__ = [
     "MarkdownSectionChunker",
     "MetadataExtractor",
     "RemovedBlock",
+    "ALL_RHETORICAL_MOVES",
+    "SECTION_ALLOWED_MOVES",
+    "RhetoricalMoveClassification",
+    "RhetoricalMoveClassificationLLM",
+    "RhetoricalMoveEnricher",
+    "RhetoricalMoveResult",
     "SectionChunk",
     "article_quintile",
     "classify_filtered_markdown",

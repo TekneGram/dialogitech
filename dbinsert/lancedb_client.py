@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import lancedb
+import pyarrow as pa
 
 from .lancedb_schema import chunk_table_schema
 from .models import EmbeddedChunkRecord
@@ -31,6 +32,7 @@ class LanceChunkStore:
 
         if self.table_name in table_names:
             self._table = self._db.open_table(self.table_name)
+            self._ensure_schema_columns(chunk_table_schema(vector_dim))
             return
 
         self._table = self._db.create_table(
@@ -77,3 +79,32 @@ class LanceChunkStore:
 
     def _escape_sql_string(self, value: str) -> str:
         return value.replace("'", "''")
+
+    def _ensure_schema_columns(self, expected_schema: pa.Schema) -> None:
+        """Add non-breaking columns when opening a database created by an older schema."""
+        assert self._table is not None
+        existing_names = set(self._table.schema.names)
+        missing = [field for field in expected_schema if field.name not in existing_names]
+        if not missing:
+            return
+        # Existing rows receive nulls; newly ingested rows always provide values.
+        nullable_fields = [
+            pa.field(field.name, self._all_nullable_type(field.type), nullable=True)
+            for field in missing
+        ]
+        self._table.add_columns(pa.schema(nullable_fields))
+
+    def _all_nullable_type(self, data_type: pa.DataType) -> pa.DataType:
+        if pa.types.is_struct(data_type):
+            return pa.struct(
+                [
+                    pa.field(child.name, self._all_nullable_type(child.type), nullable=True)
+                    for child in data_type
+                ]
+            )
+        if pa.types.is_list(data_type):
+            value_field = data_type.value_field
+            return pa.list_(
+                pa.field(value_field.name, self._all_nullable_type(value_field.type), nullable=True)
+            )
+        return data_type

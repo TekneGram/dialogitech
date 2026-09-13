@@ -17,6 +17,7 @@ class PaperChunkSerializer:
 
         for split in classified_splits:
             for chunk in split.chunks:
+                rhetorical_result = chunk.rhetorical_move_result
                 chunk_records.append(
                     ChunkRecord(
                         chunk_id=self.make_chunk_id(
@@ -44,6 +45,19 @@ class PaperChunkSerializer:
                         classification_confidence=chunk.classification.confidence,
                         used_context=chunk.classification.used_context,
                         reason=chunk.classification.reason,
+                        rhetorical_moves=[
+                            {
+                                "label": move.label,
+                                "confidence": move.confidence,
+                                "reason": move.reason,
+                            }
+                            for move in (rhetorical_result.moves if rhetorical_result else [])
+                        ],
+                        rhetorical_move_source=rhetorical_result.source if rhetorical_result else None,
+                        rhetorical_move_used_context=(
+                            rhetorical_result.used_context if rhetorical_result else False
+                        ),
+                        rhetorical_move_reason=rhetorical_result.reason if rhetorical_result else None,
                         markdown_path=paper_metadata.markdown_path,
                         marker_json_path=paper_metadata.marker_json_path,
                         pdf_path=paper_metadata.pdf_path,

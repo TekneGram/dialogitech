@@ -6,6 +6,7 @@ from typing import Literal
 
 from .llm_section_classifier import ChunkClassificationLLM
 from .markdown_section_chunker import HeadingSplit, MarkdownSectionChunker, SectionChunk
+from .rhetorical_move_classifier import RhetoricalMoveResult
 
 SectionLabel = Literal["abstract", "introduction", "method", "results", "discussion"]
 ClassificationSource = Literal["deterministic", "llm"]
@@ -30,6 +31,7 @@ class ClassifiedSectionChunk:
     text: str
     word_count: int
     classification: ChunkClassification
+    rhetorical_move_result: RhetoricalMoveResult | None = None
 
 
 @dataclass(slots=True)

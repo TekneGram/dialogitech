@@ -32,6 +32,22 @@ def chunk_table_schema(vector_dim: int) -> pa.Schema:
             pa.field("classification_confidence", pa.string()),
             pa.field("used_context", pa.bool_(), nullable=False),
             pa.field("reason", pa.string(), nullable=False),
+            pa.field(
+                "rhetorical_moves",
+                pa.list_(
+                    pa.struct(
+                        [
+                            pa.field("label", pa.string(), nullable=False),
+                            pa.field("confidence", pa.string(), nullable=False),
+                            pa.field("reason", pa.string(), nullable=False),
+                        ]
+                    )
+                ),
+                nullable=False,
+            ),
+            pa.field("rhetorical_move_source", pa.string()),
+            pa.field("rhetorical_move_used_context", pa.bool_(), nullable=False),
+            pa.field("rhetorical_move_reason", pa.string()),
             pa.field("markdown_path", pa.string()),
             pa.field("marker_json_path", pa.string()),
             pa.field("pdf_path", pa.string()),

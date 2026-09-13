@@ -99,6 +99,11 @@ def main() -> None:
         action="store_true",
         help="Force re-chunking and reclassification even if classified chunks already exist.",
     )
+    parser.add_argument(
+        "--rerun-rhetorical-moves",
+        action="store_true",
+        help="Force rerunning rhetorical-move classification while reusing resolved section classifications.",
+    )
     args = parser.parse_args()
 
     pdf_dir = Path(args.pdf_dir)
@@ -155,6 +160,7 @@ def main() -> None:
                 rerun_marker=args.rerun_marker,
                 rerun_filtered_markdown=args.rerun_filtered_markdown,
                 rerun_classification=args.rerun_classification,
+                rerun_rhetorical_moves=args.rerun_rhetorical_moves,
             )
         except Exception as exc:
             failures.append(

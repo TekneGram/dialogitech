@@ -10,6 +10,7 @@ from chunker.section_classifier import (
     ClassifiedHeadingSplit,
     ClassifiedSectionChunk,
 )
+from chunker.rhetorical_move_classifier import RhetoricalMoveClassification, RhetoricalMoveResult
 
 from .models import PaperMetadataRecord
 
@@ -35,6 +36,25 @@ def load_classified_heading_splits(path: str | Path) -> tuple[list[ClassifiedHea
                 used_context=bool(classification_payload.get("used_context", False)),
                 needs_llm=bool(classification_payload.get("needs_llm", False)),
             )
+            rhetorical_payload = chunk_payload.get("rhetorical_move_result")
+            rhetorical_move_result = None
+            if isinstance(rhetorical_payload, dict):
+                moves_payload = rhetorical_payload.get("moves", [])
+                if not isinstance(moves_payload, list):
+                    raise RuntimeError("Rhetorical move result has an invalid moves list.")
+                rhetorical_move_result = RhetoricalMoveResult(
+                    moves=[
+                        RhetoricalMoveClassification(
+                            label=move["label"],
+                            confidence=move["confidence"],
+                            reason=move["reason"],
+                        )
+                        for move in moves_payload
+                    ],
+                    source=rhetorical_payload.get("source", "llm"),
+                    used_context=bool(rhetorical_payload.get("used_context", False)),
+                    reason=str(rhetorical_payload.get("reason", "")),
+                )
 
             classified_chunks.append(
                 ClassifiedSectionChunk(
@@ -44,6 +64,7 @@ def load_classified_heading_splits(path: str | Path) -> tuple[list[ClassifiedHea
                     text=chunk_payload["text"],
                     word_count=int(chunk_payload["word_count"]),
                     classification=classification,
+                    rhetorical_move_result=rhetorical_move_result,
                 )
             )
 

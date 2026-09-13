@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from chunker.section_classifier import ClassifiedHeadingSplit
+from chunker.rhetorical_move_classifier import RhetoricalMoveEnricher
 
 from .embedding_service import EmbeddingService
 from .index_manager import LanceIndexManager
@@ -30,6 +31,26 @@ class ChunkIngestionService:
         create_indexes: bool = True,
         replace_existing: bool = False,
     ) -> int:
+        missing_rhetorical_moves = [
+            f"{split.title} [chunk {chunk.chunk_index}]"
+            for split in classified_splits
+            for chunk in split.chunks
+            if chunk.rhetorical_move_result is None
+        ]
+        if missing_rhetorical_moves:
+            raise RuntimeError(
+                "Refusing to ingest chunks without rhetorical-move classification.\n"
+                + "\n".join(missing_rhetorical_moves[:10])
+            )
+        for split in classified_splits:
+            for chunk in split.chunks:
+                if chunk.classification.label is None:
+                    raise RuntimeError("Refusing to ingest a chunk without a resolved section classification.")
+                assert chunk.rhetorical_move_result is not None
+                RhetoricalMoveEnricher.validate_result(
+                    chunk.rhetorical_move_result,
+                    section_label=chunk.classification.label,
+                )
         chunk_records = self.serializer.serialize_paper(paper_metadata, classified_splits)
         if not chunk_records:
             return 0
