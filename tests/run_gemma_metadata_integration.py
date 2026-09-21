@@ -33,35 +33,32 @@ def main() -> None:
             "Paper ID, such as 2026_shi_et_al, or a path to its Marker JSON file."
         ),
     )
-    parser.add_argument(
-        "--component",
-        choices=("title", "journal", "authors"),
-        default="title",
-        help="Metadata component to extract (default: title).",
-    )
     args = parser.parse_args()
 
     artifact_path = resolve_artifact(args.paper)
     if not artifact_path.is_file():
         parser.error(f"Marker JSON artifact not found: {artifact_path}")
 
-    extractor = LLMMetadataExtractor()
+    extractor = LLMMetadataExtractor(event_logger=print)
 
     try:
-        decision = extractor.extract_component(artifact_path, args.component)
+        result = extractor.extract_metadata(artifact_path)
     finally:
         extractor.close()
 
     print(f"Artifact: {artifact_path}")
-    print(
-        f"Validated Gemma {args.component} response:",
-        {
-            "value": decision.value,
-            "confidence": decision.confidence,
-            "reason": decision.reason,
-        },
-        flush=True,
-    )
+    for component in ("title", "journal", "authors"):
+        decision = getattr(result, component)
+        print(
+            f"Validated Gemma {component} response:",
+            {
+                "value": decision.value,
+                "confidence": decision.confidence,
+                "reason": decision.reason,
+                "provenance": decision.provenance,
+            },
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

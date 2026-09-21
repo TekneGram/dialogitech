@@ -78,6 +78,124 @@ class AlwaysMissingExtractor(LLMMetadataExtractor):
 
 
 class TestMetadataFlow(unittest.TestCase):
+    def test_marker_html_rejects_doi_from_navigation_link(self) -> None:
+        document = {
+            "children": [
+                {
+                    "id": "/page/0/Page/0",
+                    "children": [
+                        {
+                            "block_type": "Text",
+                            "html": (
+                                '<a href="https://doi.org/10.1080/2331186X.2025.2543113">'
+                                "Cite this article</a>"
+                            ),
+                        },
+                        {
+                            "block_type": "Text",
+                            "html": (
+                                '<a href="https://doi.org/10.1080/2331186X.2025.2551175">'
+                                "Previous article</a>"
+                            ),
+                        },
+                    ],
+                }
+            ]
+        }
+
+        class WrongDoiExtractor(LLMMetadataExtractor):
+            def _extract_component(self, component, compact_json):
+                return MetadataDecision(
+                    value={
+                        "name": "Example Journal",
+                        "year": "2025",
+                        "doi": "10.1080/2331186X.2025.2551175",
+                    },
+                    confidence="high",
+                    reason="Test response",
+                    source_pages=[0],
+                )
+
+        messages: list[str] = []
+        extractor = WrongDoiExtractor(event_logger=messages.append)
+
+        decision = extractor.extract_component(document, "journal", allow_manual=False)
+
+        self.assertTrue(any("does not occur" in message for message in messages))
+        self.assertIsNone(decision.value["doi"])
+        self.assertEqual(decision.provenance["doi"], ["unresolved"])
+
+    def test_crossref_is_retried_after_page_expansion_finds_doi(self) -> None:
+        document = {
+            "children": [
+                {
+                    "id": f"/page/{page_number}/Page/{page_number}",
+                    "children": [
+                        {
+                            "block_type": "Text",
+                            "html": (
+                                '<a href="https://doi.org/10.1080/2331186X.2025.2551175">'
+                                "Previous article</a>"
+                                if page_number < 2
+                                else '<a href="https://doi.org/10.1080/2331186X.2025.2543113">'
+                                "Cite this article</a>"
+                            ),
+                        }
+                    ],
+                }
+                for page_number in range(4)
+            ]
+        }
+
+        class FakeDoiClient:
+            def __init__(self) -> None:
+                self.lookups: list[str] = []
+
+            def lookup(self, doi: str) -> dict:
+                self.lookups.append(doi)
+                return {
+                    "doi": doi,
+                    "title": "Example Paper",
+                    "authors": ["Example Author"],
+                    "journal": "Example Journal",
+                    "year": "2025",
+                }
+
+        doi_client = FakeDoiClient()
+
+        class ExpandingExtractor(LLMMetadataExtractor):
+            def _extract_component(self, component, compact_json):
+                if "doi_metadata" in compact_json:
+                    value = {
+                        "name": "Example Journal",
+                        "year": "2025",
+                        "doi": compact_json["doi_metadata"]["doi"],
+                    }
+                elif len(compact_json["pages"]) == 2:
+                    value = {
+                        "name": None,
+                        "year": "2025",
+                        "doi": "10.1080/2331186X.2025.2551175",
+                    }
+                else:
+                    value = {
+                        "name": None,
+                        "year": "2025",
+                        "doi": "10.1080/2331186X.2025.2543113",
+                    }
+                return MetadataDecision(
+                    value=value,
+                    confidence="high",
+                    reason="Test response",
+                    source_pages=[page["page_number"] for page in compact_json["pages"]],
+                )
+
+        extractor = ExpandingExtractor(doi_metadata_client=doi_client)
+        decision = extractor.extract_component(document, "journal", allow_manual=False)
+
+        self.assertEqual(doi_client.lookups, ["10.1080/2331186x.2025.2543113"])
+        self.assertEqual(decision.value["name"], "Example Journal")
+
     def test_missing_values_trigger_pages_two_and_three(self) -> None:
         extractor = FakeMetadataExtractor()
 

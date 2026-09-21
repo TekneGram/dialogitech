@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
+from difflib import SequenceMatcher
 
 
 class DoiMetadataError(RuntimeError):
@@ -93,6 +94,54 @@ class DoiMetadataClient:
         encoding="utf-8",
     )
     return normalized
+
+  def matches_paper(
+      self,
+      metadata: dict[str, Any],
+      *,
+      title: Any = None,
+      authors: Any = None,
+  ) -> bool:
+    """Check that Crossref metadata belongs to the extracted paper."""
+    crossref_title = metadata.get("title")
+    if title is not None:
+      if not isinstance(title, str) or not isinstance(crossref_title, str):
+        return False
+      if self._title_similarity(title, crossref_title) < 0.60:
+        return False
+
+    if authors:
+      crossref_authors = metadata.get("authors")
+      if not isinstance(crossref_authors, list):
+        return False
+      extracted_names = self._author_surnames(authors)
+      crossref_names = self._author_surnames(crossref_authors)
+      if extracted_names and not extracted_names.intersection(crossref_names):
+        return False
+
+    return True
+
+  def _title_similarity(self, left: str, right: str) -> float:
+    left_normalized = self._normalize_text(left)
+    right_normalized = self._normalize_text(right)
+    if not left_normalized or not right_normalized:
+      return 0.0
+    return SequenceMatcher(None, left_normalized, right_normalized).ratio()
+
+  def _author_surnames(self, authors: Any) -> set[str]:
+    if not isinstance(authors, list):
+      authors = [authors]
+    surnames: set[str] = set()
+    for author in authors:
+      if not isinstance(author, str):
+        continue
+      tokens = self._normalize_text(author).split()
+      if tokens:
+        surnames.add(tokens[-1])
+    return surnames
+
+  def _normalize_text(self, value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
 
   def _cache_path(self, doi: str) -> Path:
     key = hashlib.sha256(doi.lower().encode("utf-8")).hexdigest()
