@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from chunker.llm_metadata_extractor import LLMMetadataExtractor
+from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecision
 
 
 class TestLLMMetadataExtractorUnit(unittest.TestCase):
@@ -81,6 +82,42 @@ class TestLLMMetadataExtractorUnit(unittest.TestCase):
                 for block in page["blocks"]
             )
         )
+
+    def test_extract_all_includes_deterministic_references(self) -> None:
+        document = {
+            "children": [
+                {
+                    "id": "/page/0/Page/0",
+                    "children": [
+                        {"block_type": "SectionHeader", "html": "<h1>References</h1>"},
+                        {
+                            "block_type": "ListGroup",
+                            "children": [
+                                {"html": "<li>Smith, J. (2020). Journal of Testing, 1, 2-3.</li>"}
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        class CompleteExtractor(LLMMetadataExtractor):
+            def _extract_component(self, component, compact_json):
+                if component == "journal":
+                    value = {"name": "Journal", "year": "2020"}
+                elif component == "authors":
+                    value = ["Smith, J."]
+                else:
+                    value = "Example title"
+                return MetadataDecision(
+                    value=value,
+                    confidence="high",
+                    reason="Test response",
+                    source_pages=[0],
+                )
+
+        result = CompleteExtractor().extract_all(document, allow_manual=False)
+        self.assertEqual(result["references"], ["Smith, J. (2020). Journal of Testing, 1, 2-3."])
 
 
 class TestLLMMetadataExtractorIntegration(unittest.TestCase):

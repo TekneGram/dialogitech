@@ -15,12 +15,14 @@ from chunker.boilerplate_filter import BoilerplateFilter
 from chunker.llm_section_classifier import ChunkClassificationLLM
 from chunker.llm_paper_type_classifier import PaperTypeClassificationLLM
 from chunker.markdown_section_chunker import MarkdownSectionChunker
-from chunker.metadata_extractor import MetadataExtractor
 from chunker.llm_rhetorical_move_classifier import RhetoricalMoveClassificationLLM
 from chunker.rhetorical_move_classifier import RhetoricalMoveEnricher
 from chunker.paper_type_classifier import PaperTypeClassification, classify_paper_type
 from chunker.section_taxonomy import allowed_sections
 from chunker.section_classifier import ChunkClassificationEnricher, ClassifiedHeadingSplit
+
+from chunker.llm_metadata_extractor import LLMMetadataExtractor
+from chunker.llm_metadata_extractor_helpers.metadata_models import (MetadataExtractionResult)
 
 from .ingest_service import ChunkIngestionService
 from .metadata_checker import (
@@ -110,9 +112,24 @@ class PdfToLancePipeline:
 
         # Start the analysis and extraction of data from the Marker artifacts
         self._emit_stage(f"[{paper_id}] Loading Marker JSON.")
-        metadata_extractor = MetadataExtractor()
-        document = metadata_extractor.load_json(marker_json_path)
-        extracted_metadata = metadata_extractor.extract_all(document)
+        metadata_log_path = artifact_dir / f"{paper_id}_metadata.log"
+        with metadata_log_path.open("a", encoding="utf-8") as metadata_log:
+            metadata_extractor = LLMMetadataExtractor(
+                model_path=resolved_model_path,
+                python_executable=resolved_python_executable,
+                request_timeout_seconds=llm_timeout_seconds,
+                event_logger=lambda message: self._emit_metadata_event(
+                    paper_id=paper_id,
+                    message=message,
+                    log_file=metadata_log,
+                ),
+            )
+            try:
+                document = metadata_extractor.load_marker_json(marker_json_path)
+                extracted_result = metadata_extractor.extract_metadata(document)
+                extracted_metadata = self._metadata_result_to_dict(extracted_result)
+            finally:
+                metadata_extractor.close()
         extracted_metadata = self._ensure_required_metadata(
             paper_id=paper_id,
             pdf_path=pdf_path,
@@ -249,6 +266,7 @@ class PdfToLancePipeline:
             "classified_json_path": str(classified_json_path),
             "marker_log_path": str(marker_log_path),
             "classification_log_path": str(classification_log_path),
+            "metadata_log_path": str(metadata_log_path),
             "inserted_chunks": inserted_count,
         }
 
@@ -283,6 +301,18 @@ class PdfToLancePipeline:
             raise RuntimeError(f"[{paper_id}] Required metadata is still incomplete after prompting: {missing}")
 
         return completed_metadata
+
+    def _metadata_result_to_dict(self, result: MetadataExtractionResult) -> dict[str, Any]:
+        return {
+            "title": result.title.value,
+            "journal": result.journal.value,
+            "authors": list(result.authors.value or []),
+            "references": list(result.references),
+        }
+
+    def _emit_metadata_event(self, *, paper_id: str, message: str, log_file: Any) -> None:
+        log_file.write(f"[{paper_id}] {message}\n")
+        log_file.flush()
 
     # _run_marker calls a subProcess to run the conversion of the pdf to 
     def _run_marker(self, *, pdf_path: Path, output_dir: Path, marker_log_path: Path) -> None:

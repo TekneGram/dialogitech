@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from chunker.metadata_extractor import MetadataExtractor
+from chunker.llm_metadata_extractor import LLMMetadataExtractor
 from chunker.section_classifier import (
     ChunkClassification,
     ClassifiedHeadingSplit,
@@ -108,7 +108,11 @@ def build_paper_metadata(
         raise RuntimeError("Classified chunk JSON is missing a resolved paper_type.")
 
     if marker_json_path is not None:
-        metadata = MetadataExtractor().extract_all(marker_json_path)
+        metadata_extractor = LLMMetadataExtractor()
+        try:
+            metadata = metadata_extractor.extract_all(marker_json_path, allow_manual=False)
+        finally:
+            metadata_extractor.close()
         title = metadata.get("title")
         authors = list(metadata.get("authors") or [])
 

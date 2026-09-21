@@ -12,6 +12,7 @@ from chunker.llm_metadata_extractor_helpers.metadata_evidence import MetadataEvi
 from chunker.llm_metadata_extractor_helpers.metadata_flow import MetadataExtractionFlow
 from chunker.llm_metadata_extractor_helpers.missing_values_handler import MetaDataMissingValuesHandler
 from chunker.llm_metadata_extractor_helpers.response_parsing_validation import MetadataResponseValidator
+from chunker.llm_metadata_extractor_helpers.reference_extractor import DeterministicReferenceExtractor
 
 DEFAULT_MODEL_PATH = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
 DEFAULT_PYTHON_EXECUTABLE = (
@@ -24,6 +25,8 @@ class LLMMetadataExtractor:
   from the json file returned after extraction by marker:
     - title
     - authors: [ "...", "..." ]
+    - references: [ "...", "..." ] (deterministically extracted from the
+      Marker references section)
     - journal: {
         "name" : "...",
         "volume": "...",
@@ -59,6 +62,7 @@ class LLMMetadataExtractor:
     self.response_validator = MetadataResponseValidator()
     self.doi_metadata_client = doi_metadata_client or DoiMetadataClient()
     self.evidence = MetadataEvidence()
+    self.reference_extractor = DeterministicReferenceExtractor()
     self.component_runner = MetadataComponentRunner(
         generate=self._generate,
         prompt_builders={
@@ -95,7 +99,23 @@ class LLMMetadataExtractor:
         title=decisions["title"],
         journal=decisions["journal"],
         authors=decisions["authors"],
+        references=self.reference_extractor.extract(document),
     )
+
+  def extract_all(
+      self,
+      source: str | Path | dict[str, Any],
+      *,
+      allow_manual: bool = True,
+  ) -> dict[str, Any]:
+    """Return the legacy dictionary shape for pipeline consumers."""
+    result = self.extract_metadata(source, allow_manual=allow_manual)
+    return {
+        "title": result.title.value,
+        "journal": result.journal.value,
+        "authors": result.authors.value or [],
+        "references": result.references,
+    }
 
   def extract_component(
       self,
