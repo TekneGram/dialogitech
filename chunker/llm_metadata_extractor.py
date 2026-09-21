@@ -200,7 +200,7 @@ class LLMMetadataExtractor:
 
       compact_pages.append(
         {
-          "page_number": page_index,
+          "page_number": page_number,
           "blocks": compact_blocks,
         }
       )
