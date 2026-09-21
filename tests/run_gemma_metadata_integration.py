@@ -4,9 +4,6 @@ import argparse
 from pathlib import Path
 
 from chunker.llm_metadata_extractor import LLMMetadataExtractor
-from chunker.llm_metadata_extractor_helpers.response_parsing_validation import (
-    MetadataResponseValidator,
-)
 
 
 def resolve_artifact(value: str) -> Path:
@@ -49,24 +46,9 @@ def main() -> None:
         parser.error(f"Marker JSON artifact not found: {artifact_path}")
 
     extractor = LLMMetadataExtractor()
-    validator = MetadataResponseValidator()
 
     try:
-        document = extractor.load_marker_json(artifact_path)
-        pages = extractor.select_pages(document, [0, 1])
-        compact_json = extractor.compact_page_json(pages)
-        prompt_builder = {
-            "title": extractor.build_title_prompt,
-            "journal": extractor.build_journal_prompt,
-            "authors": extractor.build_authors_prompt,
-        }[args.component]
-        prompt = prompt_builder(compact_json)
-
-        raw_response = extractor._generate([
-            {"role": "user", "content": prompt}
-        ])
-        payload = validator.parse_json_response(raw_response)
-        decision = validator.validate_decision(payload, args.component)
+        decision = extractor.extract_component(artifact_path, args.component)
     finally:
         extractor.close()
 

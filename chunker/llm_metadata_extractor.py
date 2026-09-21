@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Callable
 from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecision
+from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataExtractionResult
 from chunker.llm_metadata_extractor_helpers.gemma_worker import MetadataGemmaWorker
+from chunker.llm_metadata_extractor_helpers.metadata_component_runner import MetadataComponentRunner
+from chunker.llm_metadata_extractor_helpers.metadata_evidence import MetadataEvidence
+from chunker.llm_metadata_extractor_helpers.metadata_flow import MetadataExtractionFlow
+from chunker.llm_metadata_extractor_helpers.missing_values_handler import MetaDataMissingValuesHandler
+from chunker.llm_metadata_extractor_helpers.response_parsing_validation import MetadataResponseValidator
 
 DEFAULT_MODEL_PATH = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
 DEFAULT_PYTHON_EXECUTABLE = (
@@ -37,6 +42,7 @@ class LLMMetadataExtractor:
       temperature: float = 0.0,
       request_timeout_seconds: float = 180.0,
       event_logger: Callable[[str], None] | None = None,
+      input_fn: Callable[[str], str] | None = None,
   ) -> None:
     if request_timeout_seconds <= 0:
       raise ValueError("request_timeout_seconds must be a positive number.")
@@ -47,9 +53,62 @@ class LLMMetadataExtractor:
     self.temperature = temperature
     self.request_timeout_seconds = request_timeout_seconds
     self.event_logger = event_logger
+    self.metadata_handler = MetaDataMissingValuesHandler(input_fn or input)
+    self.response_validator = MetadataResponseValidator()
+    self.evidence = MetadataEvidence()
+    self.component_runner = MetadataComponentRunner(
+        generate=self._generate,
+        prompt_builders={
+            "title": self.build_title_prompt,
+            "journal": self.build_journal_prompt,
+            "authors": self.build_authors_prompt,
+        },
+        validator=self.response_validator,
+    )
+    self.extraction_flow = MetadataExtractionFlow(
+        evidence=self.evidence,
+        component_extractor=self._extract_component,
+        missing_values_handler=self.metadata_handler,
+        event_logger=self._log_event,
+    )
 
     # Start lazily when the first request is made.
     self._worker: Any = None
+
+  def extract_metadata(
+      self,
+      source: str | Path | dict[str, Any],
+      *,
+      allow_manual: bool = True,
+  ) -> MetadataExtractionResult:
+    document = self.load_marker_json(source)
+    decisions = self.extraction_flow.extract(
+        document,
+        components=("title", "journal", "authors"),
+        allow_manual=allow_manual,
+    )
+    return MetadataExtractionResult(
+        title=decisions["title"],
+        journal=decisions["journal"],
+        authors=decisions["authors"],
+    )
+
+  def extract_component(
+      self,
+      source: str | Path | dict[str, Any],
+      component: str,
+      *,
+      allow_manual: bool = True,
+  ) -> MetadataDecision:
+    if component not in {"title", "journal", "authors"}:
+      raise ValueError(f"Unsupported metadata component: {component}")
+
+    document = self.load_marker_json(source)
+    return self.extraction_flow.extract(
+        document,
+        components=(component,),
+        allow_manual=allow_manual,
+    )[component]
 
   # NOTES
   #  - run_full_pipeline_folder.py catches exceptions per PDF.
@@ -103,110 +162,17 @@ class LLMMetadataExtractor:
     return document
 
   def select_pages(
-    self,
-    document: dict[str, Any],
-    page_numbers: list[int],
+      self,
+      document: dict[str, Any],
+      page_numbers: list[int],
   ) -> list[dict[str, Any]]:
-    """
-      Return the requested Marker pages in the requested order.
-    """
-    if not isinstance(document, dict):
-      raise TypeError("Marker document must be a dictionary.")
-
-    if not isinstance(page_numbers, list):
-      raise TypeError("page_numbers must be a list of integers.")
-
-    requested_pages: list[int] = []
-    for page_number in page_numbers:
-      if isinstance(page_number, bool) or not isinstance(page_number, int):
-        raise TypeError("Each page number must be a non-negative integer.")
-      if page_number < 0:
-        raise ValueError("Page numbers must be non-negative.")
-      if page_number not in requested_pages:
-        requested_pages.append(page_number)
-
-    children = document.get("children")
-    if not isinstance(children, list):
-      raise ValueError("Marker document does not contain a valid 'children' list.")
-
-    pages_by_number: dict[int, dict[str, Any]] = {}
-    for page in children:
-      if not isinstance(page, dict):
-        continue
-
-      page_id = page.get("id")
-      if not isinstance(page_id, str):
-        continue
-
-      match = re.search(r"/page/(\d+)/", page_id)
-      if match is None:
-        continue
-
-      page_number = int(match.group(1))
-      pages_by_number.setdefault(page_number, page)
-
-    missing_pages = [
-      page_number
-      for page_number in requested_pages
-      if page_number not in pages_by_number
-    ]
-    if missing_pages:
-      raise KeyError(f"Marker pages not found: {missing_pages}")
-
-    return [pages_by_number[page_number] for page_number in requested_pages]
+    return self.evidence.select_pages(document, page_numbers)
 
   def compact_page_json(
-    self,
-    pages: list[dict[str, Any]],
+      self,
+      pages: list[dict[str, Any]],
   ) -> dict[str, list[dict[str, Any]]]:
-    """
-      Keep only the text-bearing fields needed for metadata extraction.
-    """
-    if not isinstance(pages, list):
-      raise TypeError("pages must be a list of page dictionaries.")
-
-    compact_pages: list[dict[str, Any]] = []
-    for page_index, page in enumerate(pages):
-      if not isinstance(page, dict):
-        raise TypeError("Each page must be a dictionary.")
-      page_id = page.get("id")
-      if not isinstance(page_id, str):
-        raise ValueError(f"Page at index {page_index} does not have a valid 'id'.")
-
-      page_match = re.search(r"/page/(\d+)/", page_id)
-      if page_match is None:
-        raise ValueError(f"Could not determine page number from page ID: {page_id!r}")
-      page_number = int(page_match.group(1))
-
-      blocks = page.get("children")
-      if not isinstance(blocks, list):
-        raise ValueError(f"Page at index {page_index} does not contain a valid 'children' list.")
-
-      compact_blocks: list[dict[str, Any]] = []
-      for block in blocks:
-        if not isinstance(block, dict):
-          continue
-
-        block_type = block.get("block_type")
-        html = block.get("html")
-        if not isinstance(block_type, str) or not isinstance(html, str):
-          continue
-
-        compact_blocks.append(
-          {
-            "block_type": block_type,
-            "html": html,
-          }
-        )
-
-      compact_pages.append(
-        {
-          "page_number": page_number,
-          "blocks": compact_blocks,
-        }
-      )
-
-    return {"pages": compact_pages}
+    return self.evidence.compact_pages(pages)
 
   # Three separate prompts for the three metadata fields
   def build_title_prompt(self, compact_json) -> str:
@@ -377,5 +343,9 @@ class LLMMetadataExtractor:
   def __exit__(self, exc_type, exc_value, traceback) -> None:
     self.close()
 
-  def _extract_component(self, component, compact_json) -> MetadataDecision:
-    return
+  def _extract_component(
+      self,
+      component: str,
+      compact_json: dict[str, Any],
+  ) -> MetadataDecision:
+    return self.component_runner.extract(component, compact_json)
