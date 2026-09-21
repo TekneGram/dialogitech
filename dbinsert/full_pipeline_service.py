@@ -131,6 +131,9 @@ class PdfToLancePipeline:
                 extracted_metadata = self._metadata_result_to_dict(extracted_result)
             finally:
                 metadata_extractor.close()
+
+        # Check all the metadata is present - if not can still insert into LanceDB but issue a warning
+        # and a trace log.
         extracted_metadata = self._ensure_required_metadata(
             paper_id=paper_id,
             pdf_path=pdf_path,
@@ -139,6 +142,8 @@ class PdfToLancePipeline:
             metadata_trace_log_path=metadata_trace_log_path,
         )
 
+        # Create the raw text markdown file from the pdf text data
+        # Recreate it if rerun_filtered_markdown is set to True (e.g., we are re-running the data extraction from just the json files after an earlier marker pdf extraction)
         if rerun_filtered_markdown or not filtered_markdown_path.exists():
             self._emit_stage(f"[{paper_id}] Generating filtered markdown.")
             filtered_markdown = BoilerplateFilter().convert_json_to_markdown(

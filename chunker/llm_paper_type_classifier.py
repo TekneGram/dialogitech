@@ -22,12 +22,12 @@ class PaperTypeClassificationLLM(ChunkClassificationLLM):
     JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
     SYSTEM_PROMPT = """You classify the genre of academic papers.
 
-Return JSON only. Choose exactly one allowed paper type. Do not infer an empirical study merely because a paper discusses research. Use other_or_unclear when the supplied evidence does not justify a more specific type.
-Confidence must be low, medium, or high.
+      Return JSON only. Choose exactly one allowed paper type. Do not infer an empirical study merely because a paper discusses research. Use other_or_unclear when the supplied evidence does not justify a more specific type.
+      Confidence must be low, medium, or high.
 
-JSON schema:
-{"label":"literature_review","confidence":"high","reason":"short explanation"}
-"""
+      JSON schema:
+      {"label":"literature_review","confidence":"high","reason":"short explanation"}
+    """
 
     def __init__(
         self,
@@ -66,7 +66,18 @@ JSON schema:
                 return self._correct_invalid_response(response, exc)
         except RuntimeError as exc:
             self._log_event(f"paper-type classification failed: {exc}")
-            raise RuntimeError(f"Gemma failed to classify paper type: {exc}") from exc
+            fallback_reason = (
+                "Gemma did not produce a valid paper-type classification; "
+                f"assigned other_or_unclear. Original error: {exc}"
+            )
+            self._log_event(f"paper-type fallback applied: {fallback_reason}")
+            return PaperTypeClassification(
+                label="other_or_unclear",
+                source="llm",
+                confidence="low",
+                reason=fallback_reason,
+                needs_llm=False,
+            )
 
     def _prompt(self, evidence: PaperTypeEvidence) -> str:
         return "\n".join([
