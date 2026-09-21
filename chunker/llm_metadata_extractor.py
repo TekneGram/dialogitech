@@ -3,21 +3,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable, dataclass
-
-# Confidence should be either "high", "medium" or "low"
-@dataclass
-class MetadataDecision:
-  value: Any | None
-  confidence: str
-  reason: str
-  source_pages: list[int]
-
-@dataclass
-class MetadataExtractionResult:
-  title: MetadataDecision
-  journal: MetadataDecision
-  authors: MetadataDecision
+from typing import Any, Callable
+from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecision
 
 class LLMMetadataExtractor:
   """

@@ -1,4 +1,4 @@
-from llm_metadata_extractor import MetadataDecision
+from metadata_models import MetadataDecision
 
 class MetadataResponseValidator:
 
