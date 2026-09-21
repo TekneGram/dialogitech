@@ -218,7 +218,32 @@ class LLMMetadataExtractor:
     }
     If the information is absent, value is null and confidence is high with reason that metadata is absent.
     """
-    return
+    evidence_json = json.dumps(
+          compact_json,
+          ensure_ascii=False,
+          indent=2
+        )
+    
+    return f"""
+    Identify the academic paper title from the supplied Market page data.
+
+    Rules:
+    - Use only the supplied JSON evidence.
+    - Prefer a prominent title-like SectionHeader near the beginning
+    - Do not return journal name, artciel type, abstract heading, or author names.
+    - If the title is not present, return null
+    - Confidence must be exactly one of "high", "medium" or "low"
+    - Return JSON only. Do not include Markdown or commentary.
+
+    Required JSON format: 
+    {{
+      "value": "Paper title or null",
+      "confidence": "high",
+      "reason": "Concise explanation for the decisions"
+    }}
+
+    Marker Page data: {evidence_json}
+    """.strip()
 
   def build_journal_prompt(self, compact_json) -> str:
     """
