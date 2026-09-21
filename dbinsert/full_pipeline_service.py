@@ -87,6 +87,7 @@ class PdfToLancePipeline:
         classified_json_path = artifact_dir / f"{paper_id}_classified_chunks.json"
         marker_log_path = artifact_dir / f"{paper_id}_marker.log"
         classification_log_path = artifact_dir / f"{paper_id}_classification.log"
+        metadata_trace_log_path = artifact_dir / f"{paper_id}_metadata_trace.log"
 
         # Prepare model paths and print to the screen that the pipeline has started
         resolved_model_path = model_path or DEFAULT_GEMMA_MODEL_PATH
@@ -135,6 +136,7 @@ class PdfToLancePipeline:
             pdf_path=pdf_path,
             marker_json_path=marker_json_path,
             extracted_metadata=extracted_metadata,
+            metadata_trace_log_path=metadata_trace_log_path,
         )
 
         if rerun_filtered_markdown or not filtered_markdown_path.exists():
@@ -267,6 +269,7 @@ class PdfToLancePipeline:
             "marker_log_path": str(marker_log_path),
             "classification_log_path": str(classification_log_path),
             "metadata_log_path": str(metadata_log_path),
+            "metadata_trace_log_path": str(metadata_trace_log_path),
             "inserted_chunks": inserted_count,
         }
 
@@ -277,10 +280,18 @@ class PdfToLancePipeline:
         pdf_path: Path,
         marker_json_path: Path,
         extracted_metadata: dict[str, Any],
+        metadata_trace_log_path: Path,
     ) -> dict[str, Any]:
         issues = self.metadata_checker.find_missing_fields(extracted_metadata)
         if not issues:
             return extracted_metadata
+
+        self._record_metadata_issues(
+            paper_id=paper_id,
+            issues=issues,
+            metadata_trace_log_path=metadata_trace_log_path,
+            stage="before manual completion",
+        )
 
         self._emit_stage(
             f"[{paper_id}] Missing required metadata detected. Prompting for manual entry."
@@ -298,9 +309,33 @@ class PdfToLancePipeline:
         remaining_issues = self.metadata_checker.find_missing_fields(completed_metadata)
         if remaining_issues:
             missing = ", ".join(issue.field_name for issue in remaining_issues)
-            raise RuntimeError(f"[{paper_id}] Required metadata is still incomplete after prompting: {missing}")
+            message = (
+                f"[{paper_id}] Metadata remains incomplete after prompting: {missing}. "
+                "Continuing with available metadata; see the metadata trace log."
+            )
+            self._emit_stage(f"WARNING: {message}")
+            self._record_metadata_issues(
+                paper_id=paper_id,
+                issues=remaining_issues,
+                metadata_trace_log_path=metadata_trace_log_path,
+                stage="after manual completion",
+            )
 
         return completed_metadata
+
+    def _record_metadata_issues(
+        self,
+        *,
+        paper_id: str,
+        issues: list[Any],
+        metadata_trace_log_path: Path,
+        stage: str,
+    ) -> None:
+        metadata_trace_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with metadata_trace_log_path.open("a", encoding="utf-8") as trace_log:
+            trace_log.write(f"[{paper_id}] Missing metadata {stage}:\n")
+            for issue in issues:
+                trace_log.write(f"- {issue.field_name} ({issue.prompt_label})\n")
 
     def _metadata_result_to_dict(self, result: MetadataExtractionResult) -> dict[str, Any]:
         return {
