@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecision
-
+from chunker.llm_metadata_extractor_helpers.gemma_worker import MetadataGemmaWorker
 
 DEFAULT_MODEL_PATH = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
 DEFAULT_PYTHON_EXECUTABLE = (
@@ -46,8 +46,9 @@ class LLMMetadataExtractor:
     self.max_tokens = max_tokens or self.MODEL_MAX_TOKENS
     self.temperature = temperature
     self.request_timeout_seconds = request_timeout_seconds
+    self.event_logger = event_logger
 
-    # Start lazilt when the first request is made.
+    # Start lazily when the first request is made.
     self._worker: Any = None
 
   # NOTES
@@ -225,12 +226,12 @@ class LLMMetadataExtractor:
         )
     
     return f"""
-    Identify the academic paper title from the supplied Market page data.
+    Identify the academic paper title from the supplied Marker page data.
 
     Rules:
     - Use only the supplied JSON evidence.
     - Prefer a prominent title-like SectionHeader near the beginning
-    - Do not return journal name, artciel type, abstract heading, or author names.
+    - Do not return the journal name, article type, abstract heading, or author names.
     - If the title is not present, return null
     - Confidence must be exactly one of "high", "medium" or "low"
     - Return JSON only. Do not include Markdown or commentary.
@@ -239,10 +240,11 @@ class LLMMetadataExtractor:
     {{
       "value": "Paper title or null",
       "confidence": "high",
-      "reason": "Concise explanation for the decisions"
+      "reason": "Concise explanation for the decision"
     }}
 
-    Marker Page data: {evidence_json}
+    Marker page data:
+    {evidence_json}
     """.strip()
 
   def build_journal_prompt(self, compact_json) -> str:
@@ -277,8 +279,43 @@ class LLMMetadataExtractor:
 
   # LLM execution and caching
   # Consider updating mlx_llm_runner to handle KV Cache
-  def _generate(messages) -> str:
-    return
+  def _generate(self, messages: list[dict[str, str]]) -> str:
+    if self._worker is None:
+      runner_path = Path(__file__).with_name("mlx_llm_runner.py")
 
-  def _extract_component(component, compact_json) -> MetadataDecision:
+      self._worker = MetadataGemmaWorker(
+        python_executable=self.python_executable,
+        runner_path=runner_path,
+        model_path=self.model_path,
+        request_timeout_seconds=self.request_timeout_seconds,
+        event_logger=self._log_event
+      )
+
+    try:
+      return self._worker.generate(
+        messages=messages,
+        max_tokens=self.max_tokens,
+        temperature=self.temperature,
+      )
+    except RuntimeError:
+      self._worker.close()
+      self._worker = None
+      raise
+
+  def _log_event(self, message: str) -> None:
+    if self.event_logger is not None:
+      self.event_logger(message)
+
+  def close(self) -> None:
+    if self._worker is not None:
+      self._worker.close()
+      self._worker = None
+
+  def __enter__(self) -> "LLMMetadataExtractor":
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback) -> None:
+    self.close()
+
+  def _extract_component(self, component, compact_json) -> MetadataDecision:
     return
