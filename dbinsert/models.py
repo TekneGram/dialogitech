@@ -28,6 +28,7 @@ class PaperMetadataRecord:
     paper_type_confidence: ClassificationConfidence | None = None
     paper_type_used_context: bool = False
     paper_type_reason: str | None = None
+    metadata_provenance: dict[str, list[str]] | None = None
 
 
 @dataclass(slots=True)
@@ -65,6 +66,7 @@ class ChunkRecord:
     markdown_path: str | None = None
     marker_json_path: str | None = None
     pdf_path: str | None = None
+    metadata_provenance: str | None = None
 
 
 @dataclass(slots=True)
@@ -103,3 +105,4 @@ class EmbeddedChunkRecord:
     markdown_path: str | None = None
     marker_json_path: str | None = None
     pdf_path: str | None = None
+    metadata_provenance: str | None = None

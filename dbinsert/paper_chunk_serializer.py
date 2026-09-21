@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from chunker.section_classifier import ClassifiedHeadingSplit
 
@@ -68,6 +69,11 @@ class PaperChunkSerializer:
                         markdown_path=paper_metadata.markdown_path,
                         marker_json_path=paper_metadata.marker_json_path,
                         pdf_path=paper_metadata.pdf_path,
+                        metadata_provenance=(
+                            json.dumps(paper_metadata.metadata_provenance, sort_keys=True)
+                            if paper_metadata.metadata_provenance is not None
+                            else None
+                        ),
                     )
                 )
 

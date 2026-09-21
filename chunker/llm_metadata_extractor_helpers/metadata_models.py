@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 # Confidence should be either "high", "medium" or "low"
@@ -8,6 +8,7 @@ class MetadataDecision:
   confidence: str
   reason: str
   source_pages: list[int]
+  provenance: dict[str, list[str]] = field(default_factory=dict)
 
 @dataclass
 class MetadataExtractionResult:

@@ -56,6 +56,7 @@ def chunk_table_schema(vector_dim: int) -> pa.Schema:
             pa.field("markdown_path", pa.string()),
             pa.field("marker_json_path", pa.string()),
             pa.field("pdf_path", pa.string()),
+            pa.field("metadata_provenance", pa.string()),
             pa.field("embedding", pa.list_(pa.float32(), vector_dim), nullable=False),
         ]
     )

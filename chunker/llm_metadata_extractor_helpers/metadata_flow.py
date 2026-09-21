@@ -81,6 +81,36 @@ class MetadataExtractionFlow:
               component,
           )
 
+        unresolved = [
+            component
+            for component, decision in decisions.items()
+            if self.missing_values_handler.needs_more_evidence(decision, component)
+        ]
+
+    if unresolved and allow_manual and "journal" in decisions:
+      if not self._has_usable_doi(decisions["journal"]):
+        manual_doi = self.missing_values_handler.prompt_for_doi()
+        decisions["journal"] = self._with_doi(decisions["journal"], manual_doi)
+
+        if manual_doi != "unknown":
+          doi_metadata = self._lookup_doi_metadata(decisions, unresolved)
+          if doi_metadata:
+            doi_json = dict(initial_json)
+            doi_json["doi_metadata"] = doi_metadata
+            for component in unresolved:
+              doi_decision = self.component_extractor(component, doi_json)
+              decisions[component] = self.missing_values_handler.merge(
+                  decisions[component],
+                  doi_decision,
+                  component,
+              )
+
+            unresolved = [
+                component
+                for component, decision in decisions.items()
+                if self.missing_values_handler.needs_more_evidence(decision, component)
+            ]
+
     for component, decision in list(decisions.items()):
       if not self.missing_values_handler.needs_more_evidence(decision, component):
         continue
@@ -112,7 +142,7 @@ class MetadataExtractionFlow:
     journal = decisions.get("journal")
     journal_value = journal.value if journal is not None else None
     doi = journal_value.get("doi") if isinstance(journal_value, dict) else None
-    if not isinstance(doi, str) or not doi.strip():
+    if not isinstance(doi, str) or not doi.strip() or doi.strip().lower() == "unknown":
       return None
 
     try:
@@ -123,3 +153,26 @@ class MetadataExtractionFlow:
 
     self.event_logger(f"Loaded DOI metadata for {doi}.")
     return metadata
+
+  def _has_usable_doi(self, decision: MetadataDecision) -> bool:
+    value = decision.value
+    doi = value.get("doi") if isinstance(value, dict) else None
+    return isinstance(doi, str) and bool(doi.strip()) and doi.strip().lower() != "unknown"
+
+  def _with_doi(
+      self,
+      decision: MetadataDecision,
+      doi: str,
+  ) -> MetadataDecision:
+    value = dict(decision.value) if isinstance(decision.value, dict) else {}
+    value["doi"] = doi
+    return MetadataDecision(
+        value=value,
+        confidence=decision.confidence,
+        reason=decision.reason,
+        source_pages=decision.source_pages,
+        provenance={
+            **decision.provenance,
+            "doi": ["manual"],
+        },
+    )

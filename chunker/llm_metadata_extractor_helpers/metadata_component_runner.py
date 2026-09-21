@@ -40,4 +40,21 @@ class MetadataComponentRunner:
         for page in compact_json.get("pages", [])
         if isinstance(page, dict) and isinstance(page.get("page_number"), int)
     ]
-    return replace(decision, source_pages=source_pages)
+    evidence_sources = ["gemma"]
+    if "doi_metadata" in compact_json:
+      evidence_sources.append("crossref")
+
+    if component == "journal" and isinstance(decision.value, dict):
+      provenance = {
+          field: list(evidence_sources)
+          for field, value in decision.value.items()
+          if value is not None
+      }
+    else:
+      provenance = {"value": evidence_sources} if decision.value is not None else {}
+
+    return replace(
+        decision,
+        source_pages=source_pages,
+        provenance=provenance,
+    )

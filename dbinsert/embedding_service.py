@@ -65,6 +65,7 @@ class EmbeddingService(ABC):
                     markdown_path=chunk.markdown_path,
                     marker_json_path=chunk.marker_json_path,
                     pdf_path=chunk.pdf_path,
+                    metadata_provenance=chunk.metadata_provenance,
                 )
             )
 

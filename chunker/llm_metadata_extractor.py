@@ -227,6 +227,7 @@ class LLMMetadataExtractor:
         "issue": "2",
         "year": "2025",
         "doi": "10.xxx/example",
+        "issn": "...",
       },
       "confidence":"high",
       "reason": "The journal and publication details appear in the front matter."

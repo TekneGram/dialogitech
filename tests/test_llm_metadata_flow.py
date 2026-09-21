@@ -60,6 +60,12 @@ class FakeMetadataExtractor(LLMMetadataExtractor):
 
 
 class AlwaysMissingExtractor(LLMMetadataExtractor):
+    def __init__(self, input_fn=None, doi_metadata_client=None) -> None:
+        super().__init__(
+            input_fn=input_fn,
+            doi_metadata_client=doi_metadata_client,
+        )
+
     def _extract_component(self, component, compact_json):
         return MetadataDecision(
             value={"name": None, "year": None}
@@ -88,12 +94,11 @@ class TestMetadataFlow(unittest.TestCase):
     def test_remaining_missing_values_use_manual_input(self) -> None:
         answers = iter(
             [
+                "unknown",
                 "Manual Journal",
                 "7",
                 "1",
                 "2024",
-                "10.9999/manual",
-                "9999-9999",
             ]
         )
         extractor = AlwaysMissingExtractor(input_fn=lambda prompt: next(answers))
@@ -105,8 +110,67 @@ class TestMetadataFlow(unittest.TestCase):
         )
 
         self.assertEqual(decision.confidence, "high")
+        self.assertEqual(decision.value["doi"], "unknown")
         self.assertEqual(decision.value["name"], "Manual Journal")
-        self.assertEqual(decision.value["issn"], "9999-9999")
+        self.assertIsNone(decision.value.get("issn"))
+
+    def test_optional_journal_fields_do_not_require_manual_input(self) -> None:
+        class CompleteRequiredExtractor(LLMMetadataExtractor):
+            def _extract_component(self, component, compact_json):
+                return MetadataDecision(
+                    value={"name": "Example Journal", "year": "2025"}
+                    if component == "journal"
+                    else None,
+                    confidence="medium",
+                    reason="Test response",
+                    source_pages=[page["page_number"] for page in compact_json["pages"]],
+                )
+
+        extractor = CompleteRequiredExtractor(
+            input_fn=lambda prompt: (_ for _ in ()).throw(
+                AssertionError("Manual input should not be requested")
+            )
+        )
+        decision = extractor.extract_component(
+            marker_document(),
+            "journal",
+            allow_manual=True,
+        )
+
+        self.assertEqual(decision.value, {"name": "Example Journal", "year": "2025"})
+
+    def test_supplied_manual_doi_is_looked_up_before_remaining_manual_fields(self) -> None:
+        class FakeDoiClient:
+            def __init__(self) -> None:
+                self.dois: list[str] = []
+
+            def lookup(self, doi: str) -> dict:
+                self.dois.append(doi)
+                return {"doi": doi, "journal": "Lookup Journal"}
+
+        doi_client = FakeDoiClient()
+        answers = iter(
+            [
+                "10.1234/manual",
+                "Manual Journal",
+                "7",
+                "1",
+                "2024",
+            ]
+        )
+        extractor = AlwaysMissingExtractor(
+            input_fn=lambda prompt: next(answers),
+            doi_metadata_client=doi_client,
+        )
+
+        decision = extractor.extract_component(
+            marker_document(),
+            "journal",
+            allow_manual=True,
+        )
+
+        self.assertEqual(doi_client.dois, ["10.1234/manual"])
+        self.assertEqual(decision.value["doi"], "10.1234/manual")
 
 
 if __name__ == "__main__":
