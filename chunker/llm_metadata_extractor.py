@@ -50,10 +50,56 @@ class LLMMetadataExtractor:
     # Start lazilt when the first request is made.
     self._worker: Any = None
 
+  # NOTES
+  #  - run_full_pipeline_folder.py catches exceptions per PDF.
+  # - It records the failure, prints the error and traceback, then continues to the
+  #   next PDF.
+
+  # - It prints a final success/failure summary and exits with status 1 if any
+  #   failed.
+
+  # What is not yet covered:
+
+  # - Metadata errors are not currently written to a dedicated per-paper log.
+  # - The single-file runner only exposes a normal traceback.
+  # - The LLM metadata extractor must send errors through the pipeline’s logger and
+  #   close its worker cleanly.
+
+  # - Interactive metadata prompts may block batch processing; batch mode needs a
+  #   policy such as automatic failure or explicit manual-entry mode.
+
+  # When integrating, add a metadata log such as:
+
+  # marker/conversion_results/<paper_id>/<paper_id>_metadata.log
+
+  # Then let metadata exceptions propagate from process_pdf; the batch runner will
+  # catch them, print them, log them in its failure summary, and continue processing
+  # the next file.
+
 
   # Handle the json metadata
-  def load_marker_json(self, source) -> dict:
-    return
+  def load_marker_json(self, source: str | Path | dict[str, Any]) -> dict[str, Any]:
+    """
+    Load a marker JSON document from path or existing dictionary
+    """
+    if isinstance(source, dict):
+      return source
+
+    path = Path(source)
+
+    if not path.is_file():
+      raise FileNotFoundError(f"Marker JSON file not found: {path}")
+
+    try:
+      document = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+      raise ValueError(f"Invalid JSON in Marker file: {path}") from exc
+
+    if not isinstance(document, dict):
+      raise ValueError("Marker JSON root must be an object")
+
+    document.setdefault("__source_path__", str(path))
+    return document
 
   def select_pages(self, document, page_numbers) -> list[dict]:
     return
