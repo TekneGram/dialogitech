@@ -121,6 +121,21 @@ class MetaDataMissingValuesHandler:
 
       print("Please enter a valid DOI such as 10.1234/example, or type 'unknown'.", flush=True)
 
+  def confirm_crossref_metadata(self, metadata: dict[str, Any]) -> bool:
+    """Ask the user to confirm Crossref data when no comparison evidence exists."""
+    print("Crossref metadata could not be checked against the extracted title or authors:")
+    for field in ("title", "authors", "journal", "year", "volume", "issue", "issn"):
+      if metadata.get(field) is not None:
+        print(f"  {field}: {metadata[field]}")
+
+    while True:
+      answer = self.input_fn("Does this DOI metadata belong to the paper? [y/n]: ").strip().lower()
+      if answer in {"y", "yes"}:
+        return True
+      if answer in {"n", "no"}:
+        return False
+      print("Please answer 'y' or 'n'.", flush=True)
+
   def _normalize_doi(self, value: str) -> str | None:
     normalized = re.sub(
         r"^https?://(dx\.)?doi\.org/",

@@ -190,7 +190,10 @@ class TestMetadataFlow(unittest.TestCase):
                     source_pages=[page["page_number"] for page in compact_json["pages"]],
                 )
 
-        extractor = ExpandingExtractor(doi_metadata_client=doi_client)
+        extractor = ExpandingExtractor(
+            input_fn=lambda prompt: "y",
+            doi_metadata_client=doi_client,
+        )
         decision = extractor.extract_component(document, "journal", allow_manual=False)
 
         self.assertEqual(doi_client.lookups, ["10.1080/2331186x.2025.2543113"])
@@ -270,6 +273,7 @@ class TestMetadataFlow(unittest.TestCase):
         answers = iter(
             [
                 "10.1234/manual",
+                "y",
                 "Manual Journal",
                 "7",
                 "1",
@@ -289,6 +293,40 @@ class TestMetadataFlow(unittest.TestCase):
 
         self.assertEqual(doi_client.dois, ["10.1234/manual"])
         self.assertEqual(decision.value["doi"], "10.1234/manual")
+
+    def test_user_rejection_of_unverifiable_crossref_data_triggers_manual_fields(self) -> None:
+        class FakeDoiClient:
+            def __init__(self) -> None:
+                self.lookups = 0
+
+            def lookup(self, doi: str) -> dict:
+                self.lookups += 1
+                return {"doi": doi, "journal": "Unconfirmed Journal", "year": "2025"}
+
+        doi_client = FakeDoiClient()
+        answers = iter(
+            [
+                "10.1234/manual",
+                "n",
+                "Manual Journal",
+                "2024",
+            ]
+        )
+        extractor = AlwaysMissingExtractor(
+            input_fn=lambda prompt: next(answers),
+            doi_metadata_client=doi_client,
+        )
+
+        decision = extractor.extract_component(
+            marker_document(),
+            "journal",
+            allow_manual=True,
+        )
+
+        self.assertEqual(doi_client.lookups, 1)
+        self.assertEqual(decision.value["doi"], "unknown")
+        self.assertEqual(decision.value["name"], "Manual Journal")
+        self.assertEqual(decision.value["year"], "2024")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ class MetadataExtractionFlow:
     self.doi_metadata_client = doi_metadata_client
     self.doi_candidate_extractor = doi_candidate_extractor or DoiCandidateExtractor()
     self.event_logger = event_logger or (lambda message: None)
+    self._doi_confirmation_rejected = False
 
   def extract(
       self,
@@ -37,6 +38,7 @@ class MetadataExtractionFlow:
       components: tuple[str, ...],
       allow_manual: bool,
   ) -> dict[str, MetadataDecision]:
+    self._doi_confirmation_rejected = False
     initial_pages = self.evidence.select_available_pages(document, [0, 1])
     if not initial_pages:
       raise RuntimeError("Marker document does not contain pages 0 or 1.")
@@ -168,7 +170,7 @@ class MetadataExtractionFlow:
       decisions: dict[str, MetadataDecision],
       unresolved: list[str],
   ) -> dict[str, Any] | None:
-    if self.doi_metadata_client is None or not unresolved:
+    if self.doi_metadata_client is None or not unresolved or self._doi_confirmation_rejected:
       return None
 
     journal = decisions.get("journal")
@@ -183,15 +185,20 @@ class MetadataExtractionFlow:
       self.event_logger(f"DOI metadata lookup failed for {doi}: {exc}")
       return None
 
+    if not self._has_comparison_evidence(decisions):
+      if not self.missing_values_handler.confirm_crossref_metadata(metadata):
+        self._doi_confirmation_rejected = True
+        self.event_logger(
+            f"Rejected DOI metadata for {doi}: user confirmation was declined."
+        )
+        decisions["journal"] = self._mark_doi_unresolved(journal)
+        return None
+
     if not self._doi_matches_paper(metadata, decisions):
       self.event_logger(
           f"Rejected DOI metadata for {doi}: title/author validation failed."
       )
-      decisions["journal"] = self._with_doi(
-          journal,
-          "unknown",
-          provenance_source="unresolved",
-      )
+      decisions["journal"] = self._mark_doi_unresolved(journal)
       return None
 
     self.event_logger(f"Loaded DOI metadata for {doi}.")
@@ -295,3 +302,28 @@ class MetadataExtractionFlow:
     title = title_decision.value if title_decision is not None else None
     authors = authors_decision.value if authors_decision is not None else None
     return matcher(metadata, title=title, authors=authors)
+
+  def _has_comparison_evidence(
+      self,
+      decisions: dict[str, MetadataDecision],
+  ) -> bool:
+    title = decisions.get("title")
+    authors = decisions.get("authors")
+    return bool(
+        (title is not None and isinstance(title.value, str) and title.value.strip())
+        or (authors is not None and isinstance(authors.value, list) and authors.value)
+    )
+
+  def _mark_doi_unresolved(self, decision: MetadataDecision) -> MetadataDecision:
+    value = dict(decision.value) if isinstance(decision.value, dict) else {}
+    value["doi"] = "unknown"
+    for field in self.missing_values_handler.JOURNAL_REQUIRED_FIELDS:
+      value[field] = None
+    return replace(
+        decision,
+        value=value,
+        provenance={
+            **decision.provenance,
+            "doi": ["unresolved"],
+        },
+    )
