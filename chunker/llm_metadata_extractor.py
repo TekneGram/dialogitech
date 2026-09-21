@@ -247,7 +247,7 @@ class LLMMetadataExtractor:
     {evidence_json}
     """.strip()
 
-  def build_journal_prompt(self, compact_json) -> str:
+  def build_journal_prompt(self, compact_json: dict[str, Any]) -> str:
     """
     Returns
     {
@@ -263,9 +263,42 @@ class LLMMetadataExtractor:
     }
     If the information is absent, value is null and confidence is high with reason that metadata is absent.
     """
-    return
+    evidence_json = json.dumps(
+      compact_json,
+      ensure_ascii=False,
+      indent=2,
+    )
 
-  def build_authors_prompt(self, compact_json) -> str:
+    return f"""
+      Identify the journal metadata from the supplied Marker page data.
+
+      Rules:
+      - Use only the supplied JSON evidence.
+      - Extract the journal name, volume, issue, year, DOI, and ISSN when present.
+      - Do not infer values that are not explicitly present.
+      - If no journal metadata is present, return null for "value".
+      - Confidence must be exactly one of "high", "medium", or "low".
+      - Return JSON only. Do not include Markdown or commentary.
+
+      Required JSON format:
+      {{
+        "value": {{
+          "name": "Journal name or null",
+          "volume": "Volume or null",
+          "issue": "Issue or null",
+          "year": "Year or null",
+          "doi": "DOI or null",
+          "issn": "ISSN or null"
+        }},
+        "confidence": "high",
+        "reason": "Concise explanation for the decision"
+      }}
+
+      Marker page data:
+      {evidence_json}
+      """.strip()
+
+  def build_authors_prompt(self, compact_json: dict[str, Any]) -> str:
     """
     Returns
     {
@@ -275,7 +308,34 @@ class LLMMetadataExtractor:
     }
     If the information is absent, value is null and confidence is high with reason that metadata is absent.
     """
-    return
+    evidence_json = json.dumps(
+      compact_json,
+      ensure_ascii=False,
+      indent=2,
+    )
+
+    return f"""
+      Identify the academic paper authors from the supplied Marker page data.
+
+      Rules:
+      - Use only the supplied JSON evidence.
+      - Prefer names appearing directly below the title and before the abstract.
+      - Exclude affiliations, institutions, publishers, copyright holders, editors, and journal names.
+      - Return authors in their displayed order.
+      - If no authors are present, return null for "value".
+      - Confidence must be exactly one of "high", "medium", or "low".
+      - Return JSON only. Do not include Markdown or commentary.
+
+      Required JSON format:
+      {{
+        "value": ["Author One", "Author Two"],
+        "confidence": "high",
+        "reason": "Concise explanation for the decision"
+      }}
+
+      Marker page data:
+      {evidence_json}
+      """.strip()
 
   # LLM execution and caching
   # Consider updating mlx_llm_runner to handle KV Cache
