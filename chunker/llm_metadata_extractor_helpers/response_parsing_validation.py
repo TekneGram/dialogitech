@@ -1,4 +1,4 @@
-from metadata_models import MetadataDecision
+from .metadata_models import MetadataDecision
 
 class MetadataResponseValidator:
 

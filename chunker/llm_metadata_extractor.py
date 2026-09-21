@@ -6,6 +6,12 @@ from pathlib import Path
 from typing import Any, Callable
 from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecision
 
+
+DEFAULT_MODEL_PATH = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
+DEFAULT_PYTHON_EXECUTABLE = (
+  Path.home() / ".unsloth" / "unsloth_gemma4_mlx" / "bin" / "python"
+)
+
 class LLMMetadataExtractor:
   """
   Gemma-backed extraction of the following metadata
@@ -21,8 +27,29 @@ class LLMMetadataExtractor:
         "issn": "..."
     }
   """
-  def __init__(self) -> None:
-    return
+  MODEL_MAX_TOKENS = 400
+  def __init__(
+      self,
+      *,
+      model_path: str | Path = DEFAULT_MODEL_PATH,
+      python_executable: str | Path = DEFAULT_PYTHON_EXECUTABLE,
+      max_tokens: int | None = None,
+      temperature: float = 0.0,
+      request_timeout_seconds: float = 180.0,
+      event_logger: Callable[[str], None] | None = None,
+  ) -> None:
+    if request_timeout_seconds <= 0:
+      raise ValueError("request_timeout_seconds must be a positive number.")
+
+    self.model_path = str(model_path)
+    self.python_executable = str(python_executable)
+    self.max_tokens = max_tokens or self.MODEL_MAX_TOKENS
+    self.temperature = temperature
+    self.request_timeout_seconds = request_timeout_seconds
+
+    # Start lazilt when the first request is made.
+    self._worker: Any = None
+
 
   # Handle the json metadata
   def load_marker_json(self, source) -> dict:
