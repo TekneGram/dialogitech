@@ -19,6 +19,8 @@ class QueryFilters:
     paper_title_contains: str | None = None
     classification_label: str | None = None
     classification_label_in: list[str] = field(default_factory=list)
+    paper_type: str | None = None
+    paper_type_in: list[str] = field(default_factory=list)
     section_title_contains: str | None = None
     author: str | None = None
     authors_any: list[str] = field(default_factory=list)
@@ -62,6 +64,7 @@ class RetrievedChunk:
     text: str
     classification_label: str | None
     classification_source: str
+    paper_type: str | None
     markdown_path: str | None
     marker_json_path: str | None
     pdf_path: str | None
@@ -87,6 +90,7 @@ class FusedChunkResult:
     text: str
     classification_label: str | None
     classification_source: str
+    paper_type: str | None
     markdown_path: str | None
     marker_json_path: str | None
     pdf_path: str | None

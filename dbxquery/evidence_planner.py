@@ -16,7 +16,7 @@ Rules:
 - The top-level JSON object must contain: intent, answer_mode, reason, tool_calls.
 - tool_calls must be a list of 1 to 3 retrieve_evidence calls.
 - Each tool call must contain: tool, query, filters, top_k.
-- Allowed filters: paper_id_in, authors_any, year_min, year_max, classification_label_in, section_title_contains.
+- Allowed filters: paper_id_in, authors_any, year_min, year_max, paper_type_in, classification_label_in, section_title_contains.
 - Keep queries short and evidence-seeking.
 - Prefer separate calls when the user asks for comparisons between papers or authors.
 """
@@ -80,6 +80,7 @@ Rules:
             year_min=self._as_optional_int(payload.get("year_min")),
             year_max=self._as_optional_int(payload.get("year_max")),
             classification_label_in=self._as_string_list(payload.get("classification_label_in")),
+            paper_type_in=self._as_string_list(payload.get("paper_type_in")),
             section_title_contains=self._as_optional_string(payload.get("section_title_contains")),
         )
 

@@ -66,6 +66,7 @@ def main() -> None:
         "--classification-label",
         help="Restrict retrieval to chunks with a specific classification label.",
     )
+    parser.add_argument("--paper-type", help="Restrict retrieval to a paper type.")
     parser.add_argument(
         "--author",
         "--authors",
@@ -106,6 +107,7 @@ def main() -> None:
                 year=args.year,
                 paper_title_contains=args.paper_title_contains,
                 classification_label=args.classification_label,
+                paper_type=args.paper_type,
                 author=args.author,
             ),
         )

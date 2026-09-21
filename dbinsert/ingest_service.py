@@ -50,6 +50,7 @@ class ChunkIngestionService:
                 RhetoricalMoveEnricher.validate_result(
                     chunk.rhetorical_move_result,
                     section_label=chunk.classification.label,
+                    paper_type=paper_metadata.paper_type or "empirical_research",
                 )
         chunk_records = self.serializer.serialize_paper(paper_metadata, classified_splits)
         if not chunk_records:

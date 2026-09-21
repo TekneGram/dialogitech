@@ -97,6 +97,7 @@ class LanceDBRetriever:
             text=str(row["text"]),
             classification_label=_as_optional_string(row.get("classification_label")),
             classification_source=str(row["classification_source"]),
+            paper_type=_as_optional_string(row.get("paper_type")),
             markdown_path=_as_optional_string(row.get("markdown_path")),
             marker_json_path=_as_optional_string(row.get("marker_json_path")),
             pdf_path=_as_optional_string(row.get("pdf_path")),

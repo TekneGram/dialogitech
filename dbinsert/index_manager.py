@@ -27,7 +27,7 @@ class LanceIndexManager:
 
     def ensure_scalar_indexes(self) -> None:
         table = self.store.table
-        for column_name in ("paper_id", "classification_label", "classification_source"):
+        for column_name in ("paper_id", "paper_type", "classification_label", "classification_source"):
             try:
                 table.create_scalar_index(column_name, replace=False)
             except RuntimeError as exc:

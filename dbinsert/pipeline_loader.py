@@ -102,6 +102,10 @@ def build_paper_metadata(
     doi: str | None = None
     issn: str | None = None
     references: list[str] = []
+    classified_payload = json.loads(classified_json_path.read_text(encoding="utf-8"))
+    paper_type_payload = classified_payload.get("paper_type")
+    if not isinstance(paper_type_payload, dict) or paper_type_payload.get("label") is None:
+        raise RuntimeError("Classified chunk JSON is missing a resolved paper_type.")
 
     if marker_json_path is not None:
         metadata = MetadataExtractor().extract_all(marker_json_path)
@@ -138,6 +142,11 @@ def build_paper_metadata(
         markdown_path=resolved_markdown_path,
         marker_json_path=str(marker_json_path) if marker_json_path is not None else None,
         pdf_path=pdf_path,
+        paper_type=str(paper_type_payload["label"]),
+        paper_type_source=paper_type_payload["source"],
+        paper_type_confidence=paper_type_payload.get("confidence"),
+        paper_type_used_context=bool(paper_type_payload.get("used_context", False)),
+        paper_type_reason=str(paper_type_payload["reason"]),
     )
 
 

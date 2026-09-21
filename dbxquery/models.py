@@ -23,6 +23,7 @@ class EvidenceFilters:
     year_min: int | None = None
     year_max: int | None = None
     classification_label_in: list[str] = field(default_factory=list)
+    paper_type_in: list[str] = field(default_factory=list)
     section_title_contains: str | None = None
 
 

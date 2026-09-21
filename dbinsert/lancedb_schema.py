@@ -32,6 +32,11 @@ def chunk_table_schema(vector_dim: int) -> pa.Schema:
             pa.field("classification_confidence", pa.string()),
             pa.field("used_context", pa.bool_(), nullable=False),
             pa.field("reason", pa.string(), nullable=False),
+            pa.field("paper_type", pa.string(), nullable=False),
+            pa.field("paper_type_source", pa.string(), nullable=False),
+            pa.field("paper_type_confidence", pa.string()),
+            pa.field("paper_type_used_context", pa.bool_(), nullable=False),
+            pa.field("paper_type_reason", pa.string(), nullable=False),
             pa.field(
                 "rhetorical_moves",
                 pa.list_(

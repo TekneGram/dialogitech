@@ -28,6 +28,10 @@ def build_where_clause(filters: QueryFilters | None) -> str | None:
         clauses.append(
             f"classification_label IN ({_render_string_list(filters.classification_label_in)})"
         )
+    if filters.paper_type:
+        clauses.append(f"paper_type = '{_escape(filters.paper_type)}'")
+    if filters.paper_type_in:
+        clauses.append(f"paper_type IN ({_render_string_list(filters.paper_type_in)})")
     return " AND ".join(clauses) or None
 
 
@@ -61,6 +65,10 @@ def row_matches_filters(row: dict[str, Any], filters: QueryFilters | None) -> bo
         classification_label = str(row.get("classification_label") or "")
         if classification_label not in filters.classification_label_in:
             return False
+    if filters.paper_type and str(row.get("paper_type") or "") != filters.paper_type:
+        return False
+    if filters.paper_type_in and str(row.get("paper_type") or "") not in filters.paper_type_in:
+        return False
     if filters.paper_title_contains:
         paper_title = str(row.get("paper_title") or "")
         if filters.paper_title_contains.lower() not in paper_title.lower():

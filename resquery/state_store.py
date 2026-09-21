@@ -136,6 +136,8 @@ class ResearchStateStore:
                 classification_label_in=[
                     str(item) for item in filters_payload.get("classification_label_in", [])
                 ],
+                paper_type=self._optional_string(filters_payload.get("paper_type")),
+                paper_type_in=[str(item) for item in filters_payload.get("paper_type_in", [])],
                 section_title_contains=self._optional_string(filters_payload.get("section_title_contains")),
                 author=self._optional_string(filters_payload.get("author")),
                 authors_any=[str(item) for item in filters_payload.get("authors_any", [])],

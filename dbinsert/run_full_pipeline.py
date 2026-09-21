@@ -58,6 +58,7 @@ def main() -> None:
         help="Optional Python executable to use for MLX inference in a separate environment.",
     )
     parser.add_argument("--force-llm", action="store_true", help="Classify all chunks with the LLM.")
+    parser.add_argument("--force-paper-type-llm", action="store_true", help="Classify paper type with Gemma even when deterministic evidence resolves it.")
     parser.add_argument(
         "--llm-timeout-seconds",
         type=float,
@@ -87,6 +88,7 @@ def main() -> None:
         action="store_true",
         help="Force re-chunking and reclassification even if classified chunks already exist.",
     )
+    parser.add_argument("--rerun-paper-type", action="store_true", help="Force paper-type classification and dependent stages.")
     parser.add_argument(
         "--rerun-rhetorical-moves",
         action="store_true",
@@ -123,17 +125,20 @@ def main() -> None:
         model_path=args.model_path,
         python_executable=args.python_executable,
         force_llm=args.force_llm,
+        force_paper_type_llm=args.force_paper_type_llm,
         llm_timeout_seconds=args.llm_timeout_seconds,
         replace_existing=args.replace_existing,
         create_indexes=not args.skip_indexes,
         rerun_marker=args.rerun_marker,
         rerun_filtered_markdown=args.rerun_filtered_markdown,
         rerun_classification=args.rerun_classification,
+        rerun_paper_type=args.rerun_paper_type,
         rerun_rhetorical_moves=args.rerun_rhetorical_moves,
     )
 
     print(f"paper_id={result['paper_id']}")
     print(f"paper_title={result['paper_title']}")
+    print(f"paper_type={result['paper_type']}")
     print(f"marker_json_path={result['marker_json_path']}")
     print(f"filtered_markdown_path={result['filtered_markdown_path']}")
     print(f"classified_json_path={result['classified_json_path']}")

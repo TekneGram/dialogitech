@@ -51,6 +51,7 @@ class EvidencePlanValidator:
             year_min=filters.year_min,
             year_max=filters.year_max,
             classification_label_in=[value for value in filters.classification_label_in if value],
+            paper_type_in=[value for value in filters.paper_type_in if value],
             section_title_contains=filters.section_title_contains,
         )
 

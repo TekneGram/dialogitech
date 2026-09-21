@@ -38,6 +38,7 @@ class ReciprocalRankFuser:
                     text=exemplar.text,
                     classification_label=exemplar.classification_label,
                     classification_source=exemplar.classification_source,
+                    paper_type=exemplar.paper_type,
                     markdown_path=exemplar.markdown_path,
                     marker_json_path=exemplar.marker_json_path,
                     pdf_path=exemplar.pdf_path,

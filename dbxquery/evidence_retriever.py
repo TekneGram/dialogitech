@@ -69,6 +69,7 @@ class EvidenceRetriever:
             year_min=filters.year_min,
             year_max=filters.year_max,
             classification_label_in=list(filters.classification_label_in),
+            paper_type_in=list(filters.paper_type_in),
             section_title_contains=filters.section_title_contains,
             authors_any=list(filters.authors_any),
         )

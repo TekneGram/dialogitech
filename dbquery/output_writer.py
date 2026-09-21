@@ -48,6 +48,7 @@ class QueryOutputWriter:
             lines.append(f"chunk_index: {chunk.chunk_index}")
             lines.append(f"classification_label: {chunk.classification_label}")
             lines.append(f"classification_source: {chunk.classification_source}")
+            lines.append(f"paper_type: {chunk.paper_type}")
             lines.append(f"rrf_score: {chunk.rrf_score:.6f}")
             lines.append(f"retrieval_keys: {', '.join(chunk.retrieval_keys)}")
             lines.append(

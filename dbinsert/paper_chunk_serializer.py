@@ -13,6 +13,8 @@ class PaperChunkSerializer:
         paper_metadata: PaperMetadataRecord,
         classified_splits: list[ClassifiedHeadingSplit],
     ) -> list[ChunkRecord]:
+        if paper_metadata.paper_type is None or paper_metadata.paper_type_source is None or paper_metadata.paper_type_reason is None:
+            raise RuntimeError("Cannot serialize chunks without a resolved paper-type classification.")
         chunk_records: list[ChunkRecord] = []
 
         for split in classified_splits:
@@ -45,6 +47,11 @@ class PaperChunkSerializer:
                         classification_confidence=chunk.classification.confidence,
                         used_context=chunk.classification.used_context,
                         reason=chunk.classification.reason,
+                        paper_type=paper_metadata.paper_type,
+                        paper_type_source=paper_metadata.paper_type_source,
+                        paper_type_confidence=paper_metadata.paper_type_confidence,
+                        paper_type_used_context=paper_metadata.paper_type_used_context,
+                        paper_type_reason=paper_metadata.paper_type_reason,
                         rhetorical_moves=[
                             {
                                 "label": move.label,

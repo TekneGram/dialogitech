@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-SectionLabel = Literal["abstract", "introduction", "method", "results", "discussion"]
+SectionLabel = str
 ClassificationSource = Literal["deterministic", "llm"]
 ClassificationConfidence = Literal["low", "medium", "high"]
 
@@ -23,6 +23,11 @@ class PaperMetadataRecord:
     markdown_path: str | None = None
     marker_json_path: str | None = None
     pdf_path: str | None = None
+    paper_type: str | None = None
+    paper_type_source: ClassificationSource | None = None
+    paper_type_confidence: ClassificationConfidence | None = None
+    paper_type_used_context: bool = False
+    paper_type_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -48,6 +53,11 @@ class ChunkRecord:
     classification_confidence: ClassificationConfidence | None
     used_context: bool
     reason: str
+    paper_type: str
+    paper_type_source: ClassificationSource
+    paper_type_confidence: ClassificationConfidence | None
+    paper_type_used_context: bool
+    paper_type_reason: str
     rhetorical_moves: list[dict[str, str]]
     rhetorical_move_source: str | None
     rhetorical_move_used_context: bool
@@ -80,6 +90,11 @@ class EmbeddedChunkRecord:
     classification_confidence: ClassificationConfidence | None
     used_context: bool
     reason: str
+    paper_type: str
+    paper_type_source: ClassificationSource
+    paper_type_confidence: ClassificationConfidence | None
+    paper_type_used_context: bool
+    paper_type_reason: str
     rhetorical_moves: list[dict[str, str]]
     rhetorical_move_source: str | None
     rhetorical_move_used_context: bool
