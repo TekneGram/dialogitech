@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from .doi_metadata_client import DoiMetadataClient, DoiMetadataError
 from .metadata_evidence import MetadataEvidence
 from .metadata_models import MetadataDecision
 from .missing_values_handler import MetaDataMissingValuesHandler
@@ -16,11 +17,13 @@ class MetadataExtractionFlow:
       evidence: MetadataEvidence,
       component_extractor: Callable[[str, dict[str, Any]], MetadataDecision],
       missing_values_handler: MetaDataMissingValuesHandler,
+      doi_metadata_client: DoiMetadataClient | None = None,
       event_logger: Callable[[str], None] | None = None,
   ) -> None:
     self.evidence = evidence
     self.component_extractor = component_extractor
     self.missing_values_handler = missing_values_handler
+    self.doi_metadata_client = doi_metadata_client
     self.event_logger = event_logger or (lambda message: None)
 
   def extract(
@@ -46,10 +49,30 @@ class MetadataExtractionFlow:
         if self.missing_values_handler.needs_more_evidence(decision, component)
     ]
 
+    doi_metadata = self._lookup_doi_metadata(decisions, unresolved)
+    if doi_metadata:
+      doi_json = dict(initial_json)
+      doi_json["doi_metadata"] = doi_metadata
+      for component in unresolved:
+        doi_decision = self.component_extractor(component, doi_json)
+        decisions[component] = self.missing_values_handler.merge(
+            decisions[component],
+            doi_decision,
+            component,
+        )
+
+      unresolved = [
+          component
+          for component, decision in decisions.items()
+          if self.missing_values_handler.needs_more_evidence(decision, component)
+      ]
+
     if unresolved:
       additional_pages = self.evidence.select_available_pages(document, [2, 3])
       if additional_pages:
         expanded_json = self.evidence.compact_pages(initial_pages + additional_pages)
+        if doi_metadata:
+          expanded_json["doi_metadata"] = doi_metadata
         for component in unresolved:
           additional_decision = self.component_extractor(component, expanded_json)
           decisions[component] = self.missing_values_handler.merge(
@@ -77,3 +100,26 @@ class MetadataExtractionFlow:
       )
 
     return decisions
+
+  def _lookup_doi_metadata(
+      self,
+      decisions: dict[str, MetadataDecision],
+      unresolved: list[str],
+  ) -> dict[str, Any] | None:
+    if self.doi_metadata_client is None or not unresolved:
+      return None
+
+    journal = decisions.get("journal")
+    journal_value = journal.value if journal is not None else None
+    doi = journal_value.get("doi") if isinstance(journal_value, dict) else None
+    if not isinstance(doi, str) or not doi.strip():
+      return None
+
+    try:
+      metadata = self.doi_metadata_client.lookup(doi)
+    except (DoiMetadataError, ValueError) as exc:
+      self.event_logger(f"DOI metadata lookup failed for {doi}: {exc}")
+      return None
+
+    self.event_logger(f"Loaded DOI metadata for {doi}.")
+    return metadata

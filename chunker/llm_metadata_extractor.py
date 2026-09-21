@@ -7,6 +7,7 @@ from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecis
 from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataExtractionResult
 from chunker.llm_metadata_extractor_helpers.gemma_worker import MetadataGemmaWorker
 from chunker.llm_metadata_extractor_helpers.metadata_component_runner import MetadataComponentRunner
+from chunker.llm_metadata_extractor_helpers.doi_metadata_client import DoiMetadataClient
 from chunker.llm_metadata_extractor_helpers.metadata_evidence import MetadataEvidence
 from chunker.llm_metadata_extractor_helpers.metadata_flow import MetadataExtractionFlow
 from chunker.llm_metadata_extractor_helpers.missing_values_handler import MetaDataMissingValuesHandler
@@ -43,6 +44,7 @@ class LLMMetadataExtractor:
       request_timeout_seconds: float = 180.0,
       event_logger: Callable[[str], None] | None = None,
       input_fn: Callable[[str], str] | None = None,
+      doi_metadata_client: DoiMetadataClient | None = None,
   ) -> None:
     if request_timeout_seconds <= 0:
       raise ValueError("request_timeout_seconds must be a positive number.")
@@ -55,6 +57,7 @@ class LLMMetadataExtractor:
     self.event_logger = event_logger
     self.metadata_handler = MetaDataMissingValuesHandler(input_fn or input)
     self.response_validator = MetadataResponseValidator()
+    self.doi_metadata_client = doi_metadata_client or DoiMetadataClient()
     self.evidence = MetadataEvidence()
     self.component_runner = MetadataComponentRunner(
         generate=self._generate,
@@ -69,6 +72,7 @@ class LLMMetadataExtractor:
         evidence=self.evidence,
         component_extractor=self._extract_component,
         missing_values_handler=self.metadata_handler,
+        doi_metadata_client=self.doi_metadata_client,
         event_logger=self._log_event,
     )
 
