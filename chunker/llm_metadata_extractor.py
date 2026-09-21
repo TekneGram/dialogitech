@@ -101,11 +101,111 @@ class LLMMetadataExtractor:
     document.setdefault("__source_path__", str(path))
     return document
 
-  def select_pages(self, document, page_numbers) -> list[dict]:
-    return
+  def select_pages(
+    self,
+    document: dict[str, Any],
+    page_numbers: list[int],
+  ) -> list[dict[str, Any]]:
+    """
+      Return the requested Marker pages in the requested order.
+    """
+    if not isinstance(document, dict):
+      raise TypeError("Marker document must be a dictionary.")
 
-  def compact_page_json(self, pages) -> dict:
-    return
+    if not isinstance(page_numbers, list):
+      raise TypeError("page_numbers must be a list of integers.")
+
+    requested_pages: list[int] = []
+    for page_number in page_numbers:
+      if isinstance(page_number, bool) or not isinstance(page_number, int):
+        raise TypeError("Each page number must be a non-negative integer.")
+      if page_number < 0:
+        raise ValueError("Page numbers must be non-negative.")
+      if page_number not in requested_pages:
+        requested_pages.append(page_number)
+
+    children = document.get("children")
+    if not isinstance(children, list):
+      raise ValueError("Marker document does not contain a valid 'children' list.")
+
+    pages_by_number: dict[int, dict[str, Any]] = {}
+    for page in children:
+      if not isinstance(page, dict):
+        continue
+
+      page_id = page.get("id")
+      if not isinstance(page_id, str):
+        continue
+
+      match = re.search(r"/page/(\d+)/", page_id)
+      if match is None:
+        continue
+
+      page_number = int(match.group(1))
+      pages_by_number.setdefault(page_number, page)
+
+    missing_pages = [
+      page_number
+      for page_number in requested_pages
+      if page_number not in pages_by_number
+    ]
+    if missing_pages:
+      raise KeyError(f"Marker pages not found: {missing_pages}")
+
+    return [pages_by_number[page_number] for page_number in requested_pages]
+
+  def compact_page_json(
+    self,
+    pages: list[dict[str, Any]],
+  ) -> dict[str, list[dict[str, Any]]]:
+    """
+      Keep only the text-bearing fields needed for metadata extraction.
+    """
+    if not isinstance(pages, list):
+      raise TypeError("pages must be a list of page dictionaries.")
+
+    compact_pages: list[dict[str, Any]] = []
+    for page_index, page in enumerate(pages):
+      if not isinstance(page, dict):
+        raise TypeError("Each page must be a dictionary.")
+      page_id = page.get("id")
+      if not isinstance(page_id, str):
+        raise ValueError(f"Page at index {page_index} does not have a valid 'id'.")
+
+      page_match = re.search(r"/page/(\d+)/", page_id)
+      if page_match is None:
+        raise ValueError(f"Could not determine page number from page ID: {page_id!r}")
+      page_number = int(page_match.group(1))
+
+      blocks = page.get("children")
+      if not isinstance(blocks, list):
+        raise ValueError(f"Page at index {page_index} does not contain a valid 'children' list.")
+
+      compact_blocks: list[dict[str, Any]] = []
+      for block in blocks:
+        if not isinstance(block, dict):
+          continue
+
+        block_type = block.get("block_type")
+        html = block.get("html")
+        if not isinstance(block_type, str) or not isinstance(html, str):
+          continue
+
+        compact_blocks.append(
+          {
+            "block_type": block_type,
+            "html": html,
+          }
+        )
+
+      compact_pages.append(
+        {
+          "page_number": page_index,
+          "blocks": compact_blocks,
+        }
+      )
+
+    return {"pages": compact_pages}
 
   # Three separate prompts for the three metadata fields
   def build_title_prompt(self, compact_json) -> str:
@@ -157,4 +257,3 @@ class LLMMetadataExtractor:
 
   def _extract_component(component, compact_json) -> MetadataDecision:
     return
-
