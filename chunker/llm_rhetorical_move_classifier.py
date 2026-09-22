@@ -5,10 +5,14 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .llm_section_classifier import ChunkClassificationLLM, ChunkContext, ChunkLocation
+from .llm_section_classifier import SectionClassificationLLM
 from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
-from .rhetorical_move_classifier import (
+from .llm_section_type_classifier_helpers.section_type_models import (
+    ChunkContext,
+    ChunkLocation,
     ClassificationConfidence,
+)
+from .rhetorical_move_classifier import (
     RhetoricalMoveClassification,
     RhetoricalMoveEnricher,
     RhetoricalMoveResult,
@@ -16,7 +20,7 @@ from .rhetorical_move_classifier import (
 )
 
 
-class RhetoricalMoveClassificationLLM(ChunkClassificationLLM):
+class RhetoricalMoveClassificationLLM(SectionClassificationLLM):
     """Gemma-backed, section-constrained rhetorical-move classifier."""
 
     MODEL_MAX_TOKENS = 360

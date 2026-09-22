@@ -68,15 +68,13 @@ def main() -> None:
     parser.add_argument(
         "--model-path",
         default=DEFAULT_GEMMA_MODEL_PATH,
-        help="Gemma model path for LLM fallback classification.",
+        help="Gemma model path for LLM-based paper, section, and rhetorical-move classification.",
     )
     parser.add_argument(
         "--python-executable",
         default=DEFAULT_GEMMA_PYTHON,
         help="Optional Python executable to use for MLX inference in a separate environment.",
     )
-    parser.add_argument("--force-llm", action="store_true", help="Classify all chunks with the LLM.")
-    parser.add_argument("--force-paper-type-llm", action="store_true", help="Classify paper type with Gemma even when deterministic evidence resolves it.")
     parser.add_argument("--min-words", type=int, default=200, help="Minimum chunk size in words.")
     parser.add_argument("--overlap-words", type=int, default=50, help="Chunk overlap size in words.")
     parser.add_argument("--skip-indexes", action="store_true", help="Insert rows without building indexes.")
@@ -156,7 +154,6 @@ def main() -> None:
                 pdf_path,
                 model_path=args.model_path,
                 python_executable=args.python_executable,
-                force_llm=args.force_llm,
                 replace_existing=args.replace_existing,
                 create_indexes=False,
                 rerun_marker=args.rerun_marker,

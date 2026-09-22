@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 from chunker.llm_metadata_extractor import LLMMetadataExtractor
+from chunker.llm_section_type_classifier_helpers.section_type_models import ChunkClassification
 from chunker.section_classifier import (
-    ChunkClassification,
     ClassifiedHeadingSplit,
     ClassifiedSectionChunk,
 )
@@ -34,7 +34,6 @@ def load_classified_heading_splits(path: str | Path) -> tuple[list[ClassifiedHea
                 reason=classification_payload["reason"],
                 confidence=classification_payload.get("confidence"),
                 used_context=bool(classification_payload.get("used_context", False)),
-                needs_llm=bool(classification_payload.get("needs_llm", False)),
             )
             rhetorical_payload = chunk_payload.get("rhetorical_move_result")
             rhetorical_move_result = None

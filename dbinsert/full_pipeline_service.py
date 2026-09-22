@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from chunker.boilerplate_filter import BoilerplateFilter
-from chunker.llm_section_classifier import ChunkClassificationLLM
+from chunker.llm_section_classifier import SectionClassificationLLM
 from chunker.llm_paper_type_classifier import PaperTypeClassificationLLM
 from chunker.markdown_section_chunker import MarkdownSectionChunker
 from chunker.llm_rhetorical_move_classifier import RhetoricalMoveClassificationLLM
@@ -21,8 +21,8 @@ from chunker.llm_paper_type_classifier_helpers.paper_type_models import (
     PAPER_TYPES,
     PaperTypeClassification,
 )
-from chunker.section_taxonomy import allowed_sections
-from chunker.section_classifier import ChunkClassificationEnricher, ClassifiedHeadingSplit
+from chunker.llm_section_type_classifier_helpers.section_taxonomy import allowed_sections
+from chunker.section_classifier import ClassifiedHeadingSplit, ClassifiedSectionChunk
 
 from chunker.llm_metadata_extractor import LLMMetadataExtractor
 from chunker.llm_metadata_extractor_helpers.metadata_models import (MetadataExtractionResult)
@@ -65,7 +65,6 @@ class PdfToLancePipeline:
         *,
         model_path: str | None = None,
         python_executable: str | None = None,
-        force_llm: bool = False,
         llm_timeout_seconds: float = 180.0,
         replace_existing: bool = False,
         create_indexes: bool = True,
@@ -164,7 +163,6 @@ class PdfToLancePipeline:
             filtered_markdown_path=filtered_markdown_path,
             model_path=resolved_model_path,
             python_executable=resolved_python_executable,
-            force_llm=force_llm,
             rerun_classification=rerun_classification,
             rerun_paper_type=rerun_paper_type,
         )
@@ -193,16 +191,23 @@ class PdfToLancePipeline:
                         filtered_markdown=filtered_markdown,
                         metadata=extracted_metadata
                     )
-            self._ensure_paper_type_resolved(paper_type, paper_id=paper_id)
+
+            # After paper type has been classified, emit the current status to the user.
+            self._emit_paper_type_status(paper_type, paper_id=paper_id)
+
+            # Begin the chunking process
+            # This chunks the text into sizes of min_words
+            # Each chunk will then be classified.
             self._emit_stage(f"[{paper_id}] Chunking filtered markdown.")
             heading_splits = MarkdownSectionChunker(
                 min_words=self.min_words,
                 overlap_words=self.overlap_words,
             ).process(filtered_markdown)
 
+            # Begin the classification of the chunks.
             self._emit_stage(f"[{paper_id}] Classifying chunks.")
             with classification_log_path.open("a", encoding="utf-8") as classification_log:
-                llm_classifier = ChunkClassificationLLM(
+                section_classifier = SectionClassificationLLM(
                     filtered_markdown=filtered_markdown,
                     heading_splits=heading_splits,
                     model_path=resolved_model_path,
@@ -216,15 +221,43 @@ class PdfToLancePipeline:
                 )
 
                 try:
-                    classified_splits = ChunkClassificationEnricher(
-                        llm_classifier=llm_classifier,
-                        force_llm=force_llm,
-                    ).enrich_heading_splits(heading_splits, paper_type=paper_type.label)
+                    previous_resolved_label = None
+                    classified_splits: list[ClassifiedHeadingSplit] = []
+                    for heading_split in heading_splits:
+                        classified_chunks: list[ClassifiedSectionChunk] = []
+                        for section_chunk in heading_split.chunks:
+                            classification = section_classifier.classify_section_chunk(
+                                section_chunk=section_chunk,
+                                heading_split=heading_split,
+                                paper_type=paper_type.label,
+                                previous_label=previous_resolved_label,
+                            )
+                            classified_chunks.append(
+                                ClassifiedSectionChunk(
+                                    title=section_chunk.title,
+                                    heading_level=section_chunk.heading_level,
+                                    chunk_index=section_chunk.chunk_index,
+                                    text=section_chunk.text,
+                                    word_count=section_chunk.word_count,
+                                    classification=classification,
+                                )
+                            )
+                            if classification.label is not None:
+                                previous_resolved_label = classification.label
+                        classified_splits.append(
+                            ClassifiedHeadingSplit(
+                                title=heading_split.title,
+                                heading_level=heading_split.heading_level,
+                                raw_heading=heading_split.raw_heading,
+                                content=heading_split.content,
+                                chunks=classified_chunks,
+                            )
+                        )
                 finally:
-                    llm_classifier.close()
+                    section_classifier.close()
 
         # Continue to check rhetorical moves
-        self._ensure_paper_type_resolved(paper_type, paper_id=paper_id)
+        self._emit_paper_type_status(paper_type, paper_id=paper_id)
         self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id, paper_type=paper_type.label)
         if rerun_rhetorical_moves or not self._has_rhetorical_moves(classified_splits):
             self._emit_stage(f"[{paper_id}] Classifying rhetorical moves.")
@@ -252,7 +285,6 @@ class PdfToLancePipeline:
                 source_markdown=filtered_markdown_path,
                 model_path=resolved_model_path,
                 python_executable=resolved_python_executable,
-                force_llm=force_llm,
                 paper_type=paper_type,
             )
         else:
@@ -597,14 +629,12 @@ class PdfToLancePipeline:
         source_markdown: Path,
         model_path: str | None,
         python_executable: str | None,
-        force_llm: bool,
         paper_type: PaperTypeClassification,
     ) -> None:
         payload = {
             "source_markdown": str(source_markdown),
             "model": model_path,
             "python_executable": python_executable,
-            "force_llm": force_llm,
             "paper_type": asdict(paper_type),
             "total_heading_splits": len(classified_splits),
             "total_chunks": sum(len(split.chunks) for split in classified_splits),
@@ -616,7 +646,6 @@ class PdfToLancePipeline:
         serialized = asdict(split)
         for chunk in serialized["chunks"]:
             classification = chunk["classification"]
-            classification["needs_llm"] = bool(classification["needs_llm"])
             classification["used_context"] = bool(classification["used_context"])
         return serialized
 
@@ -627,7 +656,6 @@ class PdfToLancePipeline:
         filtered_markdown_path: Path,
         model_path: str | None,
         python_executable: str | None,
-        force_llm: bool,
         rerun_classification: bool,
         rerun_paper_type: bool,
     ) -> bool:
@@ -638,15 +666,12 @@ class PdfToLancePipeline:
         stored_markdown = payload.get("source_markdown")
         stored_model = payload.get("model")
         stored_python = payload.get("python_executable")
-        stored_force_llm = bool(payload.get("force_llm", False))
-
         return (
             stored_markdown == str(filtered_markdown_path)
             and stored_model == model_path
             and stored_python == python_executable
-            and stored_force_llm == force_llm
             and self._payload_has_resolved_paper_type(payload)
-            and not self._payload_has_unresolved_chunks(payload)
+            and not self._payload_has_unresolved_or_non_llm_chunks(payload)
         )
 
     def _emit_stage(self, message: str) -> None:
@@ -714,13 +739,15 @@ class PdfToLancePipeline:
         unresolved: list[str] = []
         for split in classified_splits:
             for chunk in split.chunks:
-                if chunk.classification.needs_llm or chunk.classification.label is None:
+                if chunk.classification.label is None:
                     unresolved.append(
                         f"{split.title} [chunk {chunk.chunk_index}] "
                         f"source={chunk.classification.source} "
                         f"label={chunk.classification.label} "
                         f"reason={chunk.classification.reason}"
                         )
+                elif chunk.classification.label == "unclassified":
+                    continue
                 elif chunk.classification.label not in allowed_sections(paper_type):
                     unresolved.append(f"{split.title} [chunk {chunk.chunk_index}] label={chunk.classification.label} is invalid for paper type {paper_type}")
         if unresolved:
@@ -730,7 +757,7 @@ class PdfToLancePipeline:
                 f"Refusing to write incomplete data to LanceDB.\n{preview}"
             )
 
-    def _payload_has_unresolved_chunks(self, payload: dict[str, Any]) -> bool:
+    def _payload_has_unresolved_or_non_llm_chunks(self, payload: dict[str, Any]) -> bool:
         headings = payload.get("headings")
         if not isinstance(headings, list):
             return True
@@ -740,7 +767,10 @@ class PdfToLancePipeline:
                 return True
             for chunk in chunks:
                 classification = chunk.get("classification", {})
-                if classification.get("needs_llm") or classification.get("label") is None:
+                if (
+                    classification.get("label") is None
+                    or classification.get("source") not in {"llm", "llm_fallback"}
+                ):
                     return True
         return False
 
@@ -779,9 +809,17 @@ class PdfToLancePipeline:
                     paper_type=paper_type,
                 )
 
-    def _ensure_paper_type_resolved(self, paper_type: PaperTypeClassification, *, paper_id: str) -> None:
-        if paper_type.label is None or paper_type.label not in PAPER_TYPES:
-            raise RuntimeError(f"[{paper_id}] Paper type is unresolved: {paper_type.reason}")
+    def _emit_paper_type_status(self, paper_type: PaperTypeClassification, *, paper_id: str) -> None:
+        if paper_type.label not in PAPER_TYPES:
+            self._emit_stage(
+                f"[{paper_id}] Paper type emitted by LLM was determined not to be valid, so continuing with "
+                f"other_or_unclear as the classification: {paper_type.reason}"
+            )
+        else:
+            self._emit_stage(
+                f"[{paper_id}] Paper type emitted by LLM was determined to be valid: "
+                f"{paper_type.reason}"
+            )
 
     def _load_paper_type(self, classified_json_path: Path) -> PaperTypeClassification:
         payload = json.loads(classified_json_path.read_text(encoding="utf-8"))

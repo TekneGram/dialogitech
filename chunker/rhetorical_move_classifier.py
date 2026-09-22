@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from .section_classifier import ClassifiedHeadingSplit
 
-from .section_taxonomy import SectionLabel
+from .llm_section_type_classifier_helpers.section_taxonomy import SectionLabel
 from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
-from .section_taxonomy import allowed_sections
+from .llm_section_type_classifier_helpers.section_taxonomy import allowed_sections
 
 RhetoricalMoveLabel = Literal[
     "criticize_prior_research",
