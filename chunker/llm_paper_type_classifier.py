@@ -9,7 +9,6 @@ from .llm_worker import LLMWorker
 from .paper_type_classifier import (
     ClassificationConfidence,
     PAPER_TYPES,
-    PaperType,
     PaperTypeClassification,
     PaperTypeEvidence,
 )
@@ -155,7 +154,7 @@ class PaperTypeClassificationLLM:
           )
 
       try:
-          return self.worker.generate(
+          return self._worker.generate(
               messages=messages,
               max_tokens=self.max_tokens,
               temperature=self.temperature,

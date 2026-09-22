@@ -80,7 +80,7 @@ class LLMMetadataExtractor:
     )
 
     # Start lazily when the first request is made.
-    self._worker: LLMWorker = None
+    self._worker: LLMWorker | None = None
 
   def extract_metadata(
       self,
@@ -314,16 +314,16 @@ class LLMMetadataExtractor:
         event_logger=self._log_event
       )
 
-      try:
-        return self._worker.generate(
-          messages=messages,
-          max_tokens=self.max_tokens,
-          temperature=self.temperature
-        )
-      except RuntimeError:
-        self._worker.close()
-        self._worker = None
-        raise
+    try:
+      return self._worker.generate(
+        messages=messages,
+        max_tokens=self.max_tokens,
+        temperature=self.temperature
+      )
+    except RuntimeError:
+      self._worker.close()
+      self._worker = None
+      raise
 
   def _log_event(self, message: str) -> None:
     if self.event_logger is not None:
