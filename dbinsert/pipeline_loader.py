@@ -10,7 +10,10 @@ from chunker.section_classifier import (
     ClassifiedHeadingSplit,
     ClassifiedSectionChunk,
 )
-from chunker.rhetorical_move_classifier import RhetoricalMoveClassification, RhetoricalMoveResult
+from chunker.llm_rhetorical_move_classifier_helpers.rhetorical_move_models import (
+    RhetoricalMoveClassification,
+    RhetoricalMoveResult,
+)
 
 from .models import PaperMetadataRecord
 

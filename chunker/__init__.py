@@ -28,12 +28,13 @@ from .markdown_section_chunker import (
     SectionChunk,
 )
 from .metadata_extractor import MetadataExtractor
-from .rhetorical_move_classifier import (
+from .llm_rhetorical_move_classifier_helpers import (
     ALL_RHETORICAL_MOVES,
     SECTION_ALLOWED_MOVES,
     RhetoricalMoveClassification,
-    RhetoricalMoveEnricher,
     RhetoricalMoveResult,
+    allowed_moves,
+    validate_rhetorical_move_result,
 )
 from .section_classifier import ClassifiedHeadingSplit, ClassifiedSectionChunk
 from .llm_section_type_classifier_helpers.section_taxonomy import (
@@ -67,9 +68,10 @@ __all__ = [
     "RemovedBlock",
     "RhetoricalMoveClassification",
     "RhetoricalMoveClassificationLLM",
-    "RhetoricalMoveEnricher",
     "RhetoricalMoveResult",
     "SECTION_ALLOWED_MOVES",
+    "allowed_moves",
+    "validate_rhetorical_move_result",
     "SECTION_LABEL_DESCRIPTIONS",
     "SectionChunk",
     "SectionClassificationLLM",

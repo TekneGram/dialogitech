@@ -16,7 +16,7 @@ from chunker.llm_section_classifier import SectionClassificationLLM
 from chunker.llm_paper_type_classifier import PaperTypeClassificationLLM
 from chunker.markdown_section_chunker import MarkdownSectionChunker
 from chunker.llm_rhetorical_move_classifier import RhetoricalMoveClassificationLLM
-from chunker.rhetorical_move_classifier import RhetoricalMoveEnricher
+from chunker.llm_rhetorical_move_classifier_helpers import validate_rhetorical_move_result
 from chunker.llm_paper_type_classifier_helpers.paper_type_models import (
     PAPER_TYPES,
     PaperTypeClassification,
@@ -204,7 +204,7 @@ class PdfToLancePipeline:
                 overlap_words=self.overlap_words,
             ).process(filtered_markdown)
 
-            # Begin the classification of the chunks.
+            # Begin the classification of the chunks into sections.
             self._emit_stage(f"[{paper_id}] Classifying chunks.")
             with classification_log_path.open("a", encoding="utf-8") as classification_log:
                 section_classifier = SectionClassificationLLM(
@@ -256,7 +256,7 @@ class PdfToLancePipeline:
                 finally:
                     section_classifier.close()
 
-        # Continue to check rhetorical moves
+        # Continue to classify the chunks into rhetorical moves
         self._emit_paper_type_status(paper_type, paper_id=paper_id)
         self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id, paper_type=paper_type.label)
         if rerun_rhetorical_moves or not self._has_rhetorical_moves(classified_splits):
@@ -275,10 +275,27 @@ class PdfToLancePipeline:
                     ),
                 )
                 try:
-                    RhetoricalMoveEnricher(rhetorical_classifier).enrich_heading_splits(classified_splits, paper_type=paper_type.label)
+                    for split in classified_splits:
+                        for chunk in split.chunks:
+                            if chunk.classification.label is None:
+                                chunk.classification.label = "unclassified"
+                                self._emit_classification_event(
+                                    paper_id=paper_id,
+                                    message=(
+                                        "rhetorical moves: section classification label was missing; "
+                                        f"assigned 'unclassified' for {split.title} "
+                                        f"[chunk {chunk.chunk_index}] before rhetorical classification."
+                                    ),
+                                    log_file=classification_log,
+                                )
+                            chunk.rhetorical_move_result = rhetorical_classifier.classify(
+                                chunk=chunk,
+                                heading_split=split,
+                                section_label=chunk.classification.label,
+                            )
                 finally:
                     rhetorical_classifier.close()
-            self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id, paper_type=paper_type.label)
+            self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id)
             self._write_classified_json(
                 classified_json_path=classified_json_path,
                 classified_splits=classified_splits,
@@ -288,7 +305,7 @@ class PdfToLancePipeline:
                 paper_type=paper_type,
             )
         else:
-            self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id, paper_type=paper_type.label)
+            self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id)
 
         paper_metadata = self._build_paper_metadata(
             paper_id=paper_id,
@@ -786,7 +803,6 @@ class PdfToLancePipeline:
         classified_splits: list[ClassifiedHeadingSplit],
         *,
         paper_id: str,
-        paper_type: str,
     ) -> None:
         missing = [
             f"{split.title} [chunk {chunk.chunk_index}]"
@@ -803,10 +819,9 @@ class PdfToLancePipeline:
             for chunk in split.chunks:
                 assert chunk.rhetorical_move_result is not None
                 assert chunk.classification.label is not None
-                RhetoricalMoveEnricher.validate_result(
+                validate_rhetorical_move_result(
                     chunk.rhetorical_move_result,
                     section_label=chunk.classification.label,
-                    paper_type=paper_type,
                 )
 
     def _emit_paper_type_status(self, paper_type: PaperTypeClassification, *, paper_id: str) -> None:

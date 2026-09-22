@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from chunker.llm_rhetorical_move_classifier_helpers import validate_rhetorical_move_result
 from chunker.section_classifier import ClassifiedHeadingSplit
-from chunker.rhetorical_move_classifier import RhetoricalMoveEnricher
 
 from .embedding_service import EmbeddingService
 from .index_manager import LanceIndexManager
@@ -47,10 +47,9 @@ class ChunkIngestionService:
                 if chunk.classification.label is None:
                     raise RuntimeError("Refusing to ingest a chunk without a resolved section classification.")
                 assert chunk.rhetorical_move_result is not None
-                RhetoricalMoveEnricher.validate_result(
+                validate_rhetorical_move_result(
                     chunk.rhetorical_move_result,
                     section_label=chunk.classification.label,
-                    paper_type=paper_metadata.paper_type or "empirical_research",
                 )
         chunk_records = self.serializer.serialize_paper(paper_metadata, classified_splits)
         if not chunk_records:
