@@ -155,6 +155,8 @@ class PdfToLancePipeline:
             self._emit_stage(f"[{paper_id}] Reusing existing filtered markdown: {filtered_markdown_path}")
             filtered_markdown = filtered_markdown_path.read_text(encoding="utf-8")
 
+        # Determine whether the existing classified-chunks.json in conversion_results is still valid
+        # Returns True or False
         reuse_classification = self._can_reuse_classified_json(
             classified_json_path=classified_json_path,
             filtered_markdown_path=filtered_markdown_path,
@@ -165,6 +167,9 @@ class PdfToLancePipeline:
             rerun_classification=rerun_classification,
             rerun_paper_type=rerun_paper_type,
         )
+
+        # If a _classified_chunks.json exists in conversion_results, then reuse it.
+        # If not, then create it by classifying the type of paper.
         if reuse_classification:
             self._emit_stage(f"[{paper_id}] Reusing existing classified chunks: {classified_json_path}")
             classified_splits, _ = load_classified_heading_splits(classified_json_path)
@@ -211,6 +216,8 @@ class PdfToLancePipeline:
                     ).enrich_heading_splits(heading_splits, paper_type=paper_type.label)
                 finally:
                     llm_classifier.close()
+
+        # Continue to check rhetorical moves
         self._ensure_paper_type_resolved(paper_type, paper_id=paper_id)
         self._ensure_all_chunks_resolved(classified_splits, paper_id=paper_id, paper_type=paper_type.label)
         if rerun_rhetorical_moves or not self._has_rhetorical_moves(classified_splits):
@@ -255,6 +262,7 @@ class PdfToLancePipeline:
             paper_type=paper_type,
         )
 
+        # Insert data into LanceDB here
         self._emit_stage(f"[{paper_id}] Generating embeddings and inserting into LanceDB.")
         inserted_count = self.ingestion_service.ingest_paper(
             paper_metadata,

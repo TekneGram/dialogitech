@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataDecision
 from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataExtractionResult
-from chunker.llm_metadata_extractor_helpers.gemma_worker import MetadataGemmaWorker
+from chunker.llm_worker import LLMWorker
 from chunker.llm_metadata_extractor_helpers.metadata_component_runner import MetadataComponentRunner
 from chunker.llm_metadata_extractor_helpers.doi_metadata_client import DoiMetadataClient
 from chunker.llm_metadata_extractor_helpers.metadata_evidence import MetadataEvidence
@@ -25,8 +25,7 @@ class LLMMetadataExtractor:
   from the json file returned after extraction by marker:
     - title
     - authors: [ "...", "..." ]
-    - references: [ "...", "..." ] (deterministically extracted from the
-      Marker references section)
+    - references: [ "...", "..." ] (deterministically extracted from the Marker references section)
     - journal: {
         "name" : "...",
         "volume": "...",
@@ -81,7 +80,7 @@ class LLMMetadataExtractor:
     )
 
     # Start lazily when the first request is made.
-    self._worker: Any = None
+    self._worker: LLMWorker = None
 
   def extract_metadata(
       self,
@@ -133,33 +132,6 @@ class LLMMetadataExtractor:
         components=(component,),
         allow_manual=allow_manual,
     )[component]
-
-  # NOTES
-  #  - run_full_pipeline_folder.py catches exceptions per PDF.
-  # - It records the failure, prints the error and traceback, then continues to the
-  #   next PDF.
-
-  # - It prints a final success/failure summary and exits with status 1 if any
-  #   failed.
-
-  # What is not yet covered:
-
-  # - Metadata errors are not currently written to a dedicated per-paper log.
-  # - The single-file runner only exposes a normal traceback.
-  # - The LLM metadata extractor must send errors through the pipeline’s logger and
-  #   close its worker cleanly.
-
-  # - Interactive metadata prompts may block batch processing; batch mode needs a
-  #   policy such as automatic failure or explicit manual-entry mode.
-
-  # When integrating, add a metadata log such as:
-
-  # marker/conversion_results/<paper_id>/<paper_id>_metadata.log
-
-  # Then let metadata exceptions propagate from process_pdf; the batch runner will
-  # catch them, print them, log them in its failure summary, and continue processing
-  # the next file.
-
 
   # Handle the json metadata
   def load_marker_json(self, source: str | Path | dict[str, Any]) -> dict[str, Any]:
@@ -334,7 +306,7 @@ class LLMMetadataExtractor:
     if self._worker is None:
       runner_path = Path(__file__).with_name("mlx_llm_runner.py")
 
-      self._worker = MetadataGemmaWorker(
+      self._worker = LLMWorker(
         python_executable=self.python_executable,
         runner_path=runner_path,
         model_path=self.model_path,
@@ -342,16 +314,16 @@ class LLMMetadataExtractor:
         event_logger=self._log_event
       )
 
-    try:
-      return self._worker.generate(
-        messages=messages,
-        max_tokens=self.max_tokens,
-        temperature=self.temperature,
-      )
-    except RuntimeError:
-      self._worker.close()
-      self._worker = None
-      raise
+      try:
+        return self._worker.generate(
+          messages=messages,
+          max_tokens=self.max_tokens,
+          temperature=self.temperature
+        )
+      except RuntimeError:
+        self._worker.close()
+        self._worker = None
+        raise
 
   def _log_event(self, message: str) -> None:
     if self.event_logger is not None:
