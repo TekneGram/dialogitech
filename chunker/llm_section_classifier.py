@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .markdown_section_chunker import HeadingSplit, SectionChunk
-from .paper_type_classifier import PaperType
+from .llm_paper_type_classifier_helpers.paper_type_models import PaperType
 from .section_taxonomy import SECTION_LABEL_DESCRIPTIONS, SectionLabel, allowed_sections
 
 ClassificationConfidence = Literal["low", "medium", "high"]

@@ -17,7 +17,10 @@ from chunker.llm_paper_type_classifier import PaperTypeClassificationLLM
 from chunker.markdown_section_chunker import MarkdownSectionChunker
 from chunker.llm_rhetorical_move_classifier import RhetoricalMoveClassificationLLM
 from chunker.rhetorical_move_classifier import RhetoricalMoveEnricher
-from chunker.paper_type_classifier import PaperTypeClassification, classify_paper_type
+from chunker.llm_paper_type_classifier_helpers.paper_type_models import (
+    PAPER_TYPES,
+    PaperTypeClassification,
+)
 from chunker.section_taxonomy import allowed_sections
 from chunker.section_classifier import ChunkClassificationEnricher, ClassifiedHeadingSplit
 
@@ -63,7 +66,6 @@ class PdfToLancePipeline:
         model_path: str | None = None,
         python_executable: str | None = None,
         force_llm: bool = False,
-        force_paper_type_llm: bool = False,
         llm_timeout_seconds: float = 180.0,
         replace_existing: bool = False,
         create_indexes: bool = True,
@@ -163,7 +165,6 @@ class PdfToLancePipeline:
             model_path=resolved_model_path,
             python_executable=resolved_python_executable,
             force_llm=force_llm,
-            force_paper_type_llm=force_paper_type_llm,
             rerun_classification=rerun_classification,
             rerun_paper_type=rerun_paper_type,
         )
@@ -177,16 +178,21 @@ class PdfToLancePipeline:
         else:
             self._emit_stage(f"[{paper_id}] Classifying paper type.")
             with classification_log_path.open("w", encoding="utf-8") as classification_log:
-                paper_type_classifier = PaperTypeClassificationLLM(
+                # Instantiate the class using Python's "with" statement, so no need to use try: ... finally: ...
+                with PaperTypeClassificationLLM(
                     model_path=resolved_model_path,
                     python_executable=resolved_python_executable,
                     request_timeout_seconds=llm_timeout_seconds,
-                    event_logger=lambda message: self._emit_classification_event(paper_id=paper_id, message=f"paper type: {message}", log_file=classification_log),
-                )
-                try:
-                    paper_type = classify_paper_type(filtered_markdown, metadata=extracted_metadata, llm_classifier=paper_type_classifier, force_llm=force_paper_type_llm)
-                finally:
-                    paper_type_classifier.close()
+                    event_logger=lambda message: self._emit_classification_event(
+                        paper_id=paper_id,
+                        message=f"paper type: {message}",
+                        log_file=classification_log
+                    ),
+                ) as paper_type_classifier:
+                    paper_type = paper_type_classifier.classify(
+                        filtered_markdown=filtered_markdown,
+                        metadata=extracted_metadata
+                    )
             self._ensure_paper_type_resolved(paper_type, paper_id=paper_id)
             self._emit_stage(f"[{paper_id}] Chunking filtered markdown.")
             heading_splits = MarkdownSectionChunker(
@@ -248,7 +254,6 @@ class PdfToLancePipeline:
                 python_executable=resolved_python_executable,
                 force_llm=force_llm,
                 paper_type=paper_type,
-                force_paper_type_llm=force_paper_type_llm,
             )
         else:
             self._ensure_all_rhetorical_moves_resolved(classified_splits, paper_id=paper_id, paper_type=paper_type.label)
@@ -594,14 +599,12 @@ class PdfToLancePipeline:
         python_executable: str | None,
         force_llm: bool,
         paper_type: PaperTypeClassification,
-        force_paper_type_llm: bool,
     ) -> None:
         payload = {
             "source_markdown": str(source_markdown),
             "model": model_path,
             "python_executable": python_executable,
             "force_llm": force_llm,
-            "force_paper_type_llm": force_paper_type_llm,
             "paper_type": asdict(paper_type),
             "total_heading_splits": len(classified_splits),
             "total_chunks": sum(len(split.chunks) for split in classified_splits),
@@ -625,7 +628,6 @@ class PdfToLancePipeline:
         model_path: str | None,
         python_executable: str | None,
         force_llm: bool,
-        force_paper_type_llm: bool,
         rerun_classification: bool,
         rerun_paper_type: bool,
     ) -> bool:
@@ -637,14 +639,12 @@ class PdfToLancePipeline:
         stored_model = payload.get("model")
         stored_python = payload.get("python_executable")
         stored_force_llm = bool(payload.get("force_llm", False))
-        stored_force_paper_type_llm = bool(payload.get("force_paper_type_llm", False))
 
         return (
             stored_markdown == str(filtered_markdown_path)
             and stored_model == model_path
             and stored_python == python_executable
             and stored_force_llm == force_llm
-            and stored_force_paper_type_llm == force_paper_type_llm
             and self._payload_has_resolved_paper_type(payload)
             and not self._payload_has_unresolved_chunks(payload)
         )
@@ -780,7 +780,7 @@ class PdfToLancePipeline:
                 )
 
     def _ensure_paper_type_resolved(self, paper_type: PaperTypeClassification, *, paper_id: str) -> None:
-        if paper_type.needs_llm or paper_type.label is None:
+        if paper_type.label is None or paper_type.label not in PAPER_TYPES:
             raise RuntimeError(f"[{paper_id}] Paper type is unresolved: {paper_type.reason}")
 
     def _load_paper_type(self, classified_json_path: Path) -> PaperTypeClassification:
@@ -791,9 +791,11 @@ class PdfToLancePipeline:
         return PaperTypeClassification(
             label=value.get("label"), source=value["source"], reason=value["reason"],
             confidence=value.get("confidence"), used_context=bool(value.get("used_context", False)),
-            needs_llm=bool(value.get("needs_llm", False)),
         )
 
     def _payload_has_resolved_paper_type(self, payload: dict[str, Any]) -> bool:
         paper_type = payload.get("paper_type")
-        return isinstance(paper_type, dict) and paper_type.get("label") is not None and not paper_type.get("needs_llm")
+        return (
+            isinstance(paper_type, dict)
+            and paper_type.get("label") in PAPER_TYPES
+        )

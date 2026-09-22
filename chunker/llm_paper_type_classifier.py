@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .llm_worker import LLMWorker
-from .paper_type_classifier import (
-    ClassificationConfidence,
+
+from .llm_paper_type_classifier_helpers.evidence_builder import PaperTypeEvidenceBuilder
+from .llm_paper_type_classifier_helpers.paper_type_models import (
     PAPER_TYPES,
     PaperTypeClassification,
     PaperTypeEvidence,
@@ -15,13 +16,16 @@ from .paper_type_classifier import (
 
 
 class PaperTypeClassificationLLM:
-    """Gemma-backed document-level classifier using compact paper evidence."""
+    """
+      Gemma-backed document-level classifier using compact paper evidence.
+    """
 
     MODEL_MAX_TOKENS = 220
     JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
     SYSTEM_PROMPT = """You classify the genre of academic papers.
 
-      Return JSON only. Choose exactly one allowed paper type. Do not infer an empirical study merely because a paper discusses research. Use other_or_unclear when the supplied evidence does not justify a more specific type.
+      Return JSON only. Choose exactly one allowed paper type. Do not infer an empirical study merely because a paper discusses research.
+      Use other_or_unclear when the supplied evidence does not justify a more specific type.
       Confidence must be low, medium, or high.
 
       JSON schema:
@@ -37,6 +41,7 @@ class PaperTypeClassificationLLM:
         python_executable: str | Path | None = None,
         request_timeout_seconds: float = 180.0,
         event_logger: Callable[[str], None] | None = None,
+        paper_type_evidence_builder: PaperTypeEvidenceBuilder | None = None,
     ) -> None:
         if request_timeout_seconds <= 0:
             raise ValueError("request_timeout_seconds must be positive.")
@@ -49,34 +54,61 @@ class PaperTypeClassificationLLM:
         self.temperature = temperature
         self.request_timeout_seconds = request_timeout_seconds
         self.event_logger = event_logger
+
+        self.paper_type_evidence_builder = paper_type_evidence_builder or PaperTypeEvidenceBuilder()
         self._worker: LLMWorker | None = None
 
-    def classify(self, evidence: PaperTypeEvidence) -> PaperTypeClassification:
+    def classify(self, filtered_markdown: str, *, metadata: dict[str, Any] | None = None) -> PaperTypeClassification:
+        evidence = self.paper_type_evidence_builder.build(
+            filtered_markdown=filtered_markdown,
+            metadata=metadata,
+        )
+        return self._classify_evidence(evidence)
+
+    def _classify_evidence(self, evidence: PaperTypeEvidence) -> PaperTypeClassification:
         prompt = self._prompt(evidence)
+
         try:
-            self._log_event("sending paper-type classification request to Gemma 4.")
+            self._log_event(
+                "sending paper-type classification request to LLM"
+            )
             response = self._generate([
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {
+                    "role": "system",
+                    "content": self.SYSTEM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ])
-            self._log_event(f"received paper-type response: {self._truncate_for_log(response)}")
+            self._log_event(
+                f"received paper-type response: "
+                f"{self._truncate_for_log(response)}"
+            )
+
             try:
                 return self._result_from_response(response)
             except RuntimeError as exc:
                 return self._correct_invalid_response(response, exc)
+
         except RuntimeError as exc:
             self._log_event(f"paper-type classification failed: {exc}")
+
             fallback_reason = (
-                "Gemma did not produce a valid paper-type classification; "
+                "LLM did not produce a valid paper-type classification; "
                 f"assigned other_or_unclear. Original error: {exc}"
             )
-            self._log_event(f"paper-type fallback applied: {fallback_reason}")
+
+            self._log_event(
+                f"paper-type fallback applied: {fallback_reason}"
+            )
+
             return PaperTypeClassification(
                 label="other_or_unclear",
                 source="llm",
-                confidence="low",
                 reason=fallback_reason,
-                needs_llm=False,
+                confidence="low",
             )
 
     def _prompt(self, evidence: PaperTypeEvidence) -> str:
@@ -143,27 +175,26 @@ class PaperTypeClassificationLLM:
         return payload
 
     def _generate(self, messages: list[dict[str, str]]) -> str:
-      if self._worker is None:
-          runner_path = Path(__file__).with_name("mlx_llm_runner.py")
-          self._worker = LLMWorker(
-              python_executable=self.python_executable,
-              runner_path=runner_path,
-              model_path=self.model_path,
-              request_timeout_seconds=self.request_timeout_seconds,
-              event_logger=self._log_event,
-          )
+        if self._worker is None:
+            runner_path = Path(__file__).with_name("mlx_llm_runner.py")
+            self._worker = LLMWorker(
+                python_executable=self.python_executable,
+                runner_path=runner_path,
+                model_path=self.model_path,
+                request_timeout_seconds=self.request_timeout_seconds,
+                event_logger=self._log_event,
+            )
 
-      try:
-          return self._worker.generate(
-              messages=messages,
-              max_tokens=self.max_tokens,
-              temperature=self.temperature,
-          )
-
-      except RuntimeError:
-          self._worker.close()
-          self._worker = None
-          raise
+        try:
+            return self._worker.generate(
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+        except RuntimeError:
+            self._worker.close()
+            self._worker = None
+            raise
 
     def _log_event(self, message: str) -> None:
         if self.event_logger is not None:
@@ -180,9 +211,11 @@ class PaperTypeClassificationLLM:
             self._worker.close()
             self._worker = None
 
+    # Make the class usable with Python's "with" statement
+    # e.g., with PaperTypeClassificationLLM(...) as classifier
+    #         result = classifier.classify(evidence)
     def __enter__(self) -> "PaperTypeClassificationLLM":
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         self.close()
-

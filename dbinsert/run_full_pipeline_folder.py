@@ -157,7 +157,6 @@ def main() -> None:
                 model_path=args.model_path,
                 python_executable=args.python_executable,
                 force_llm=args.force_llm,
-                force_paper_type_llm=args.force_paper_type_llm,
                 replace_existing=args.replace_existing,
                 create_indexes=False,
                 rerun_marker=args.rerun_marker,

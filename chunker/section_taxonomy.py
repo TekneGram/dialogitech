@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from .paper_type_classifier import PaperType
+from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
 
 SectionLabel = Literal[
     "abstract",

@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from .section_classifier import ClassifiedHeadingSplit
 
 from .section_taxonomy import SectionLabel
-from .paper_type_classifier import PaperType
+from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
 from .section_taxonomy import allowed_sections
 
 RhetoricalMoveLabel = Literal[

@@ -6,40 +6,51 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .llm_paper_type_classifier import PaperTypeClassificationLLM
-from .metadata_extractor import MetadataExtractor
-from .paper_type_classifier import build_paper_type_evidence, classify_paper_type
+from .llm_metadata_extractor import LLMMetadataExtractor
+from .llm_paper_type_classifier_helpers.evidence_builder import (
+    PaperTypeEvidenceBuilder,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Classify the type of an academic paper from filtered Markdown.")
     parser.add_argument("markdown_path", help="Path to filtered Markdown.")
     parser.add_argument("--marker-json", help="Optional Marker JSON used to provide title metadata.")
-    parser.add_argument("--model-path", help="Gemma model path for LLM fallback classification.")
+    parser.add_argument("--model-path", required=True, help="LLM path for classification.")
     parser.add_argument("--python-executable", help="External Python executable for MLX inference.")
-    parser.add_argument("--force-llm", action="store_true", help="Classify with Gemma even when deterministic evidence resolves the type.")
     parser.add_argument("--output-path", help="Optional JSON sidecar output path.")
     args = parser.parse_args()
 
     markdown = Path(args.markdown_path).read_text(encoding="utf-8")
-    metadata = MetadataExtractor().extract_all(args.marker_json) if args.marker_json else {}
-    evidence = build_paper_type_evidence(markdown, metadata=metadata)
-    llm_classifier = None
-    if args.model_path:
-        llm_classifier = PaperTypeClassificationLLM(
+    metadata = {}
+    if args.marker_json:
+        with LLMMetadataExtractor(
             model_path=args.model_path,
             python_executable=args.python_executable,
-            event_logger=lambda message: print(message, flush=True),
+            event_logger=lambda message: print(
+                f"metadata: {message}",
+                flush=True,
+            )
+        ) as metadata_extractor:
+            metadata = metadata_extractor.extract_all(
+                args.marker_json,
+                allow_manual=True # Ensures interactive prompting for missing fields such as journal name; can be set to False in tests so that tests don't hang.
+            )
+
+    evidence = PaperTypeEvidenceBuilder().build(
+        markdown,
+        metadata=metadata
+    )
+
+    with PaperTypeClassificationLLM(
+        model_path=args.model_path,
+        python_executable=args.python_executable,
+        event_logger=lambda message: print(message, flush=True)
+    ) as paper_type_classifier:
+        result = paper_type_classifier.classify(
+            filtered_markdown=markdown,
+            metadata=metadata
         )
-    try:
-        result = classify_paper_type(
-            markdown,
-            metadata=metadata,
-            llm_classifier=llm_classifier,
-            force_llm=args.force_llm,
-        )
-    finally:
-        if llm_classifier is not None:
-            llm_classifier.close()
 
     payload = {
         "source_markdown": str(Path(args.markdown_path)),

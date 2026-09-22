@@ -6,7 +6,7 @@ from typing import Literal
 
 from .llm_section_classifier import ChunkClassificationLLM
 from .markdown_section_chunker import HeadingSplit, MarkdownSectionChunker, SectionChunk
-from .paper_type_classifier import PaperType
+from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
 from .rhetorical_move_classifier import RhetoricalMoveResult
 from .section_taxonomy import SectionLabel, allowed_sections, heading_label
 

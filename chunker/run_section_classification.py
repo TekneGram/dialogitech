@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from .llm_section_classifier import ChunkClassificationLLM
-from .paper_type_classifier import PAPER_TYPES
+from .llm_paper_type_classifier_helpers.paper_type_models import PAPER_TYPES
 from .section_classifier import classify_filtered_markdown
 
 

@@ -31,14 +31,11 @@ from .rhetorical_move_classifier import (
     RhetoricalMoveResult,
 )
 from .llm_paper_type_classifier import PaperTypeClassificationLLM
-from .paper_type_classifier import (
+from .llm_paper_type_classifier_helpers.paper_type_models import (
     PAPER_TYPES,
-    DeterministicPaperTypeClassifier,
+    PaperType,
     PaperTypeClassification,
-    PaperTypeClassificationEnricher,
     PaperTypeEvidence,
-    build_paper_type_evidence,
-    classify_paper_type,
 )
 from .section_taxonomy import PAPER_TYPE_ALLOWED_SECTIONS, SECTION_LABEL_DESCRIPTIONS, allowed_sections
 
@@ -66,9 +63,8 @@ __all__ = [
     "RhetoricalMoveEnricher",
     "RhetoricalMoveResult",
     "PAPER_TYPES",
-    "DeterministicPaperTypeClassifier",
+    "PaperType",
     "PaperTypeClassification",
-    "PaperTypeClassificationEnricher",
     "PaperTypeClassificationLLM",
     "PaperTypeEvidence",
     "PAPER_TYPE_ALLOWED_SECTIONS",
@@ -76,7 +72,5 @@ __all__ = [
     "SectionChunk",
     "article_quintile",
     "classify_filtered_markdown",
-    "build_paper_type_evidence",
-    "classify_paper_type",
     "allowed_sections",
 ]

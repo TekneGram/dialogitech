@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .llm_section_classifier import ChunkClassificationLLM, ChunkContext, ChunkLocation
-from .paper_type_classifier import PaperType
+from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
 from .rhetorical_move_classifier import (
     ClassificationConfidence,
     RhetoricalMoveClassification,
