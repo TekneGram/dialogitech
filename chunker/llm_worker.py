@@ -86,14 +86,14 @@ class LLMWorker:
     except queue.Empty as exc:
       self.close()
       raise RuntimeError(
-        "Metadata Gemma worker request timed out. "
+        "LLM worker request timed out. "
         f"Recent stderr: {self._recent_stderr()}"
       ) from exc
 
     if response_line is None:
       self.close()
       raise RuntimeError(
-        "Metadata Gemma worker exited unexpectedly. "
+        "LLM worker exited unexpectedly. "
         f"Recent stderr: {self._recent_stderr()}"
       )
 
@@ -101,17 +101,17 @@ class LLMWorker:
       payload = json.loads(response_line)
     except json.JSONDecodeError as exc:
       raise RuntimeError(
-        f"Metadata Gemma worker returned invalid JSON: {response_line!r}"
+        f"LLM worker returned invalid JSON: {response_line!r}"
       ) from exc
 
     if payload.get("error"):
       raise RuntimeError(
-        f"Metadata Gemma error: {payload['error']}"
+        f"LLM error: {payload['error']}"
       )
 
     response = payload.get("response")
     if not isinstance(response, str) or not response.strip():
-      raise RuntimeError("Metadata Gemma worker returned an empty response")
+      raise RuntimeError("LLM worker returned an empty response")
 
     return response.strip()
 
@@ -120,7 +120,7 @@ class LLMWorker:
     if process is None or process.poll() is not None:
       return
 
-    self.event_logger("Stopping Metadata Gemma worker.")
+    self.event_logger("Stopping LLM worker.")
 
     try:
       if process.stdin is not None:
@@ -150,7 +150,7 @@ class LLMWorker:
   def _send(self, payload: dict[str, object]) -> None:
     if self.process.poll() is not None:
       raise RuntimeError(
-        f"Metadata Gemma worker exited with code "
+        f"LLM worker exited with code "
         f"{self.process.returncode}"
       )
 
