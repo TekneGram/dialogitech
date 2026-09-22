@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .llm_section_classifier import ChunkClassificationLLM
+from .llm_worker import LLMWorker
 from .paper_type_classifier import (
     ClassificationConfidence,
     PAPER_TYPES,
@@ -15,7 +15,7 @@ from .paper_type_classifier import (
 )
 
 
-class PaperTypeClassificationLLM(ChunkClassificationLLM):
+class PaperTypeClassificationLLM:
     """Gemma-backed document-level classifier using compact paper evidence."""
 
     MODEL_MAX_TOKENS = 220
@@ -39,17 +39,18 @@ class PaperTypeClassificationLLM(ChunkClassificationLLM):
         request_timeout_seconds: float = 180.0,
         event_logger: Callable[[str], None] | None = None,
     ) -> None:
-        # The inherited runtime and JSON-safe subprocess worker do not require document anchors.
-        super().__init__(
-            filtered_markdown="",
-            heading_splits=[],
-            model_path=model_path,
-            max_tokens=max_tokens or self.MODEL_MAX_TOKENS,
-            temperature=temperature,
-            python_executable=python_executable,
-            request_timeout_seconds=request_timeout_seconds,
-            event_logger=event_logger,
+        if request_timeout_seconds <= 0:
+            raise ValueError("request_timeout_seconds must be positive.")
+
+        self.model_path = str(model_path)
+        self.python_executable = str(
+            python_executable or Path.home() / ".unsloth" / "unsloth_gemma4_mlx" / "bin" /"python"
         )
+        self.max_tokens = max_tokens or self.MODEL_MAX_TOKENS
+        self.temperature = temperature
+        self.request_timeout_seconds = request_timeout_seconds
+        self.event_logger = event_logger
+        self._worker: LLMWorker | None = None
 
     def classify(self, evidence: PaperTypeEvidence) -> PaperTypeClassification:
         prompt = self._prompt(evidence)
@@ -141,3 +142,48 @@ class PaperTypeClassificationLLM(ChunkClassificationLLM):
         if not isinstance(payload, dict):
             raise RuntimeError("Paper-type response must be a JSON object.")
         return payload
+
+    def _generate(self, messages: list[dict[str, str]]) -> str:
+      if self._worker is None:
+          runner_path = Path(__file__).with_name("mlx_llm_runner.py")
+          self._worker = LLMWorker(
+              python_executable=self.python_executable,
+              runner_path=runner_path,
+              model_path=self.model_path,
+              request_timeout_seconds=self.request_timeout_seconds,
+              event_logger=self._log_event,
+          )
+
+      try:
+          return self.worker.generate(
+              messages=messages,
+              max_tokens=self.max_tokens,
+              temperature=self.temperature,
+          )
+
+      except RuntimeError:
+          self._worker.close()
+          self._worker = None
+          raise
+
+    def _log_event(self, message: str) -> None:
+        if self.event_logger is not None:
+            self.event_logger(message)
+
+    def _truncate_for_log(self, response: str, max_chars: int = 240) -> str:
+        collapsed = " ".join(response.split())
+        if len(collapsed) <= max_chars:
+            return collapsed
+        return f"{collapsed[:max_chars - 3]}..."
+
+    def close(self) -> None:
+        if self._worker is not None:
+            self._worker.close()
+            self._worker = None
+
+    def __enter__(self) -> "PaperTypeClassificationLLM":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.close()
+
