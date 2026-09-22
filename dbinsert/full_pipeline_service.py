@@ -22,7 +22,7 @@ from chunker.llm_paper_type_classifier_helpers.paper_type_models import (
     PaperTypeClassification,
 )
 from chunker.llm_section_type_classifier_helpers.section_taxonomy import allowed_sections
-from chunker.section_classifier import ClassifiedHeadingSplit, ClassifiedSectionChunk
+from chunker.chunk_models import ClassifiedHeadingSplit, ClassifiedSectionChunk
 
 from chunker.llm_metadata_extractor import LLMMetadataExtractor
 from chunker.llm_metadata_extractor_helpers.metadata_models import (MetadataExtractionResult)

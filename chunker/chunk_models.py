@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .llm_section_type_classifier_helpers.section_type_models import ChunkClassification
 from .llm_rhetorical_move_classifier_helpers.rhetorical_move_models import RhetoricalMoveResult
+from .llm_section_type_classifier_helpers.section_type_models import ChunkClassification
 
 
 @dataclass(slots=True)

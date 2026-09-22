@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from chunker.section_classifier import ClassifiedHeadingSplit
+from chunker.chunk_models import ClassifiedHeadingSplit
 
 from .models import ChunkRecord, PaperMetadataRecord
 

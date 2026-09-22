@@ -36,7 +36,7 @@ from .llm_rhetorical_move_classifier_helpers import (
     allowed_moves,
     validate_rhetorical_move_result,
 )
-from .section_classifier import ClassifiedHeadingSplit, ClassifiedSectionChunk
+from .chunk_models import ClassifiedHeadingSplit, ClassifiedSectionChunk
 from .llm_section_type_classifier_helpers.section_taxonomy import (
     PAPER_TYPE_ALLOWED_SECTIONS,
     SECTION_LABEL_DESCRIPTIONS,

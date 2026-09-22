@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from chunker.llm_rhetorical_move_classifier_helpers import validate_rhetorical_move_result
-from chunker.section_classifier import ClassifiedHeadingSplit
+from chunker.chunk_models import ClassifiedHeadingSplit
 
 from .embedding_service import EmbeddingService
 from .index_manager import LanceIndexManager

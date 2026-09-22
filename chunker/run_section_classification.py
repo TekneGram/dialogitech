@@ -6,7 +6,7 @@ from pathlib import Path
 from .llm_paper_type_classifier_helpers.paper_type_models import PAPER_TYPES
 from .llm_section_classifier import SectionClassificationLLM
 from .markdown_section_chunker import MarkdownSectionChunker
-from .section_classifier import ClassifiedHeadingSplit, ClassifiedSectionChunk
+from .chunk_models import ClassifiedHeadingSplit, ClassifiedSectionChunk
 
 
 def main() -> None:

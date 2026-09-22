@@ -6,7 +6,7 @@ from pathlib import Path
 
 from chunker.llm_metadata_extractor import LLMMetadataExtractor
 from chunker.llm_section_type_classifier_helpers.section_type_models import ChunkClassification
-from chunker.section_classifier import (
+from chunker.chunk_models import (
     ClassifiedHeadingSplit,
     ClassifiedSectionChunk,
 )

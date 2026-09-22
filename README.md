@@ -37,7 +37,7 @@ ollama pull qwen3-embedding:0.6b
 - `chunker/metadata_extractor.py`: title, journal, author, and reference extraction
 - `chunker/boilerplate_filter.py`: converts Marker JSON into filtered Markdown and drops references plus all trailing appendix/supplement content
 - `chunker/markdown_section_chunker.py`: splits filtered Markdown into section chunks
-- `chunker/section_classifier.py`: deterministic section classification and enrichment
+- `chunker/chunk_models.py`: classified chunk and heading-split data models
 - `chunker/llm_section_classifier.py`: LLM fallback classification, quintiles, and context retrieval
 - `chunker/run_section_classification.py`: CLI runner for classifying a filtered Markdown file
 - `dbinsert/`: LanceDB ingestion, indexing, full-pipeline orchestration, and inspection CLIs
@@ -210,8 +210,8 @@ If you already have a Marker JSON document in `marker/conversion_results/...`, t
 from pathlib import Path
 
 from chunker import BoilerplateFilter, MetadataExtractor, MarkdownSectionChunker
-from chunker.llm_section_classifier import ChunkClassificationLLM
-from chunker.section_classifier import ChunkClassificationEnricher
+from chunker.llm_section_classifier import SectionClassificationLLM
+from chunker.chunk_models import ClassifiedHeadingSplit, ClassifiedSectionChunk
 
 json_path = Path("marker/conversion_results/2025_Uchida/2025_Uchida.json")
 document = MetadataExtractor().load_json(json_path)
@@ -219,14 +219,42 @@ metadata = MetadataExtractor().extract_all(document)
 markdown = BoilerplateFilter().convert_json_to_markdown(document, metadata=metadata)
 heading_splits = MarkdownSectionChunker().process(markdown)
 
-llm = ChunkClassificationLLM(
+llm = SectionClassificationLLM(
     filtered_markdown=markdown,
     heading_splits=heading_splits,
     model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
     python_executable="/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python",
 )
 
-classified = ChunkClassificationEnricher(llm_classifier=llm).enrich_heading_splits(heading_splits)
+classified = []
+with llm:
+    for heading_split in heading_splits:
+        chunks = []
+        previous_label = None
+        for chunk in heading_split.chunks:
+            classification = llm.classify_section_chunk(
+                section_chunk=chunk,
+                heading_split=heading_split,
+                paper_type="empirical_research",
+                previous_label=previous_label,
+            )
+            if classification.label is not None:
+                previous_label = classification.label
+            chunks.append(ClassifiedSectionChunk(
+                title=chunk.title,
+                heading_level=chunk.heading_level,
+                chunk_index=chunk.chunk_index,
+                text=chunk.text,
+                word_count=chunk.word_count,
+                classification=classification,
+            ))
+        classified.append(ClassifiedHeadingSplit(
+            title=heading_split.title,
+            heading_level=heading_split.heading_level,
+            raw_heading=heading_split.raw_heading,
+            content=heading_split.content,
+            chunks=chunks,
+        ))
 ```
 
 ## Notes

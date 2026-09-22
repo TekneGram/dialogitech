@@ -66,7 +66,7 @@ Splits filtered Markdown into heading-based chunks using:
 
 Chunks are word-count based with overlap and sentence-aware boundaries. The overlap logic should not start a new chunk in the middle of a sentence.
 
-### `chunker/section_classifier.py`
+### `chunker/chunk_models.py`
 
 Pipeline-facing classification layer. It should contain only:
 
