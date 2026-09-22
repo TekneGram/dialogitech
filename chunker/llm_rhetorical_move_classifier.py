@@ -62,6 +62,7 @@ class RhetoricalMoveClassificationLLM:
         self._location_builder = SectionLocationBuilder(
             filtered_markdown=filtered_markdown,
             heading_splits=heading_splits,
+            event_logger=self._log_event,
         )
 
     def classify(

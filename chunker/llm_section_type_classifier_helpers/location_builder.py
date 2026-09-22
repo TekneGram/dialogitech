@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import re
+from typing import Callable
+
 from .section_type_models import ArticleQuintile, ChunkContext, ChunkLocation
 from ..markdown_section_chunker import HeadingSplit, SectionChunk
 
 
 class SectionLocationBuilder:
-    def __init__(self, *, filtered_markdown: str, heading_splits: list[HeadingSplit]) -> None:
+    def __init__(
+        self,
+        *,
+        filtered_markdown: str,
+        heading_splits: list[HeadingSplit],
+        event_logger: Callable[[str], None] | None = None,
+    ) -> None:
         self.filtered_markdown = filtered_markdown
         self.heading_splits = heading_splits
+        self.event_logger = event_logger
         self.section_ranges = self.build_section_ranges()
         self.chunk_locations = self.build_chunk_locations()
 
@@ -18,7 +28,7 @@ class SectionLocationBuilder:
         article_length: int,
     ) -> ArticleQuintile:
         if article_length <= 0:
-            raise ValueError("article_length must be positive.")
+            return "third 20%"
 
         midpoint = (article_start + article_end) / 2
         ratio = midpoint / article_length
@@ -36,21 +46,28 @@ class SectionLocationBuilder:
         ranges: list[tuple[int, int]] = []
         search_start = 0
         for index, heading_split in enumerate(self.heading_splits):
-            heading_start = self.filtered_markdown.find(heading_split.raw_heading, search_start)
+            heading_start = self._find_heading_start(
+                heading_split,
+                search_start=search_start,
+            )
             if heading_start < 0:
-                raise RuntimeError(
-                    f"Could not locate heading {heading_split.raw_heading!r} in filtered markdown."
+                heading_start = search_start
+                self._log_fallback(
+                    f"heading {heading_split.title!r} was not found; using approximate section start "
+                    f"at character {heading_start}."
                 )
 
             if index + 1 < len(self.heading_splits):
-                next_heading = self.heading_splits[index + 1].raw_heading
-                section_end = self.filtered_markdown.find(
-                    next_heading,
-                    heading_start + len(heading_split.raw_heading),
+                next_heading_split = self.heading_splits[index + 1]
+                section_end = self._find_heading_start(
+                    next_heading_split,
+                    search_start=max(heading_start + 1, search_start),
                 )
                 if section_end < 0:
-                    raise RuntimeError(
-                        f"Could not locate next heading {next_heading!r} in filtered markdown."
+                    section_end = len(self.filtered_markdown)
+                    self._log_fallback(
+                        f"next heading {next_heading_split.title!r} was not found; using end of filtered Markdown "
+                        f"at character {section_end}."
                     )
             else:
                 section_end = len(self.filtered_markdown)
@@ -67,17 +84,23 @@ class SectionLocationBuilder:
             section_search_start = 0
 
             for chunk in heading_split.chunks:
-                local_start = section_text.find(chunk.text, section_search_start)
+                local_start = self._find_chunk_start(
+                    section_text,
+                    chunk.text,
+                    search_start=section_search_start,
+                )
                 if local_start < 0:
-                    raise RuntimeError(
-                        f"Could not anchor chunk {chunk.chunk_index} under heading "
-                        f"{heading_split.title!r} in filtered markdown."
+                    article_start = section_start
+                    article_end = section_end
+                    self._log_fallback(
+                        f"chunk {chunk.chunk_index} under heading {heading_split.title!r} could not be anchored; "
+                        f"using approximate section range {article_start}:{article_end}."
                     )
-
-                local_end = local_start + len(chunk.text)
-                article_start = section_start + local_start
-                article_end = section_start + local_end
-                section_search_start = local_start
+                else:
+                    local_end = local_start + len(chunk.text)
+                    article_start = section_start + local_start
+                    article_end = section_start + local_end
+                    section_search_start = max(local_end, local_start + 1)
                 locations[(heading_split.title, chunk.chunk_index)] = ChunkLocation(
                     article_start=article_start,
                     article_end=article_end,
@@ -92,13 +115,32 @@ class SectionLocationBuilder:
 
     def location_for(self, *, chunk: SectionChunk, heading_split: HeadingSplit) -> ChunkLocation:
         key = (heading_split.title, chunk.chunk_index)
-        try:
-            return self.chunk_locations[key]
-        except KeyError as exc:
-            raise RuntimeError(
-                f"Missing chunk location for heading {heading_split.title!r}, "
-                f"chunk {chunk.chunk_index}."
-            ) from exc
+        location = self.chunk_locations.get(key)
+        if location is not None:
+            return location
+
+        if not self.section_ranges:
+            self._log_fallback(
+                f"location for heading {heading_split.title!r}, chunk {chunk.chunk_index} was missing "
+                "and no section ranges exist; using synthetic zero-length location."
+            )
+            return self._location_from_range(
+                section_start=0,
+                section_end=0,
+                section_index=0,
+            )
+
+        section_index = self._section_index_for(heading_split)
+        section_start, section_end = self.section_ranges[section_index]
+        self._log_fallback(
+            f"location for heading {heading_split.title!r}, chunk {chunk.chunk_index} was missing; "
+            f"using approximate section range {section_start}:{section_end}."
+        )
+        return self._location_from_range(
+            section_start=section_start,
+            section_end=section_end,
+            section_index=section_index,
+        )
 
     def context_for(self, *, chunk: SectionChunk, heading_split: HeadingSplit) -> ChunkContext:
         location = self.location_for(chunk=chunk, heading_split=heading_split)
@@ -115,3 +157,74 @@ class SectionLocationBuilder:
             current_chunk=chunk.text,
             next_section=next_section,
         )
+
+    def _find_heading_start(self, heading_split: HeadingSplit, *, search_start: int) -> int:
+        exact_start = self.filtered_markdown.find(heading_split.raw_heading, search_start)
+        if exact_start >= 0:
+            return exact_start
+
+        wanted = self._normalize_heading(heading_split.title)
+        for match in re.finditer(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*$", self.filtered_markdown[search_start:]):
+            if self._normalize_heading(match.group(1)) == wanted:
+                matched_start = search_start + match.start()
+                self._log_fallback(
+                    f"heading {heading_split.raw_heading!r} matched normalized title at character {matched_start}."
+                )
+                return matched_start
+        return -1
+
+    def _find_chunk_start(self, section_text: str, chunk_text: str, *, search_start: int) -> int:
+        exact_start = section_text.find(chunk_text, search_start)
+        if exact_start >= 0:
+            return exact_start
+
+        normalized_chunk = re.sub(r"\s+", " ", chunk_text).strip()
+        if not normalized_chunk:
+            return -1
+        escaped_words = [re.escape(word) for word in normalized_chunk.split(" ")]
+        pattern = r"\s+".join(escaped_words)
+        match = re.search(pattern, section_text[search_start:], flags=re.IGNORECASE)
+        if match is None:
+            return -1
+        matched_start = search_start + match.start()
+        self._log_fallback(
+            f"chunk anchor used normalized-whitespace matching at local character {matched_start}."
+        )
+        return matched_start
+
+    def _section_index_for(self, heading_split: HeadingSplit) -> int:
+        for index, candidate in enumerate(self.heading_splits):
+            if candidate is heading_split or candidate.title == heading_split.title:
+                return index
+        return 0
+
+    def _location_from_range(
+        self,
+        *,
+        section_start: int,
+        section_end: int,
+        section_index: int,
+    ) -> ChunkLocation:
+        if not self.filtered_markdown:
+            self._log_fallback("filtered Markdown is empty; using synthetic zero-length location.")
+            section_start = 0
+            section_end = 0
+        return ChunkLocation(
+            article_start=section_start,
+            article_end=section_end,
+            quintile=self.article_quintile(
+                section_start,
+                section_end,
+                len(self.filtered_markdown),
+            ),
+            section_index=section_index,
+        )
+
+    def _normalize_heading(self, heading: str) -> str:
+        normalized = re.sub(r"^\s*#{1,6}\s*", "", heading)
+        normalized = re.sub(r"^\s*\d+(?:\.\d+)*[.)]?\s+", "", normalized)
+        return re.sub(r"\s+", " ", normalized).strip().casefold()
+
+    def _log_fallback(self, message: str) -> None:
+        if self.event_logger is not None:
+            self.event_logger(f"location fallback: {message}")
