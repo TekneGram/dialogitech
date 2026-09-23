@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -130,6 +131,41 @@ class CacheManager:
           return dict(row)
 
     raise ValueError(f"Conversation number not found: {conversation_number}")
+
+  def extract_summaries(self, conversation_number: int) -> list[str]:
+    """Return only the per-paper summary text for one conversation."""
+    record = self.read_record(conversation_number=conversation_number)
+    document = self.read_results(record["data_file"])
+
+    section_match = re.search(
+      r"^## Per[- ]paper summaries\s*$",
+      document,
+      flags=re.MULTILINE | re.IGNORECASE,
+    )
+    if section_match is None:
+      return []
+
+    section = document[section_match.end():]
+    section = re.split(r"^## (?!#)", section, maxsplit=1, flags=re.MULTILINE)[0]
+    summaries = []
+    for match in re.finditer(
+      r"^### Summary\s*\n(?P<summary>.*?)(?=^### |\Z)",
+      section,
+      flags=re.MULTILINE | re.DOTALL | re.IGNORECASE,
+    ):
+      summary = match.group("summary").strip()
+      if summary:
+        summaries.append(summary)
+    return summaries
+
+  def extract_queries(self, conversation_numbers: list[int]) -> dict[int, str]:
+    """Return the original query for each requested conversation."""
+    return {
+      conversation_number: self.read_record(
+        conversation_number=conversation_number
+      )["query"]
+      for conversation_number in conversation_numbers
+    }
 
   def append_to_data_file(
     self,
@@ -260,3 +296,32 @@ class CacheManager:
     )
 
     data_path.write_text(document, encoding="utf-8")
+
+  def save_summaries_synthesis(
+    self,
+    *,
+    conversation_number: int,
+    synthesis: str,
+  ) -> None:
+    """Save or replace the synthesis section for a conversation."""
+    record = self.read_record(conversation_number=conversation_number)
+    data_path = self.search_results_directory / Path(record["data_file"]).name
+    document = self.read_results(record["data_file"])
+    section = f"\n## Summaries synthesis\n\n{synthesis.strip()}\n"
+    section_pattern = re.compile(
+      r"\n## Summaries synthesis\s*\n.*?(?=\n## (?!#)|\Z)",
+      flags=re.DOTALL | re.IGNORECASE,
+    )
+    if section_pattern.search(document):
+      document = section_pattern.sub(section, document, count=1)
+    else:
+      document = document.rstrip() + "\n" + section
+    data_path.write_text(document, encoding="utf-8")
+
+  def save_review(self, review: str) -> Path:
+    """Save a generated review and return its path."""
+    self.search_results_directory.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    review_path = self.search_results_directory / f"review_{timestamp}.md"
+    review_path.write_text(review.strip() + "\n", encoding="utf-8")
+    return review_path

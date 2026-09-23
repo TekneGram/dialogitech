@@ -1,6 +1,7 @@
 import argparse
 
 from .question_search import QuestionSearch
+from .review_writer import ReviewWriter
 from .summarize_question_search import SummarizeQuestionSearch
 
 def question_search(
@@ -23,6 +24,9 @@ def summarize_question_search(
   search = SummarizeQuestionSearch()
   search.create_per_paper_summary(conversation_number)
 
+def write_review(conversation_numbers: list[int]) -> None:
+  ReviewWriter().write_review(conversation_numbers)
+
 def main() -> None:
   parser = argparse.ArgumentParser(description="DialogiTech database search commands.")
   subparsers = parser.add_subparsers(dest="command", required=True)
@@ -35,6 +39,10 @@ def main() -> None:
   summarize_question_search_parser = subparsers.add_parser(
     "summarize_question_search",
     help="Create a summary of the findings after the question search."
+  )
+  write_review_parser = subparsers.add_parser(
+    "write_review",
+    help="Write a literature review from cached conversation summaries.",
   )
 
   # Create flags for question_search
@@ -67,6 +75,14 @@ def main() -> None:
     help="Supply the conversation number to summarize results for that conversation"
   )
 
+  write_review_parser.add_argument(
+    "--conversation-numbers",
+    nargs="+",
+    type=int,
+    required=True,
+    help="Conversation numbers whose summaries should be used in the review.",
+  )
+
   args = parser.parse_args()
   if args.command == "question_search":
     question_search(
@@ -80,6 +96,9 @@ def main() -> None:
     summarize_question_search(
       conversation_number=args.conversation_number
     )
+
+  if args.command == "write_review":
+    write_review(conversation_numbers=args.conversation_numbers)
 
 
 if __name__ == "__main__":
