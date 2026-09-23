@@ -67,6 +67,11 @@ def main() -> None:
         action="store_true",
         help="Delete existing rows for the same paper_id before inserting.",
     )
+    parser.add_argument(
+        "--no-manual-metadata",
+        action="store_true",
+        help="Fail instead of prompting when required metadata is missing.",
+    )
     args = parser.parse_args()
 
     classified_splits, source_markdown = load_classified_heading_splits(args.classified_json)
@@ -76,6 +81,7 @@ def main() -> None:
         paper_id=args.paper_id,
         pdf_path=args.pdf_path,
         markdown_path=source_markdown,
+        allow_manual=not args.no_manual_metadata,
     )
 
     if args.embedding_provider == "ollama":

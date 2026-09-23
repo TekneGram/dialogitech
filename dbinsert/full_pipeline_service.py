@@ -73,6 +73,7 @@ class PdfToLancePipeline:
         rerun_classification: bool = False,
         rerun_rhetorical_moves: bool = False,
         rerun_paper_type: bool = False,
+        no_ocr: bool = False,
     ) -> dict[str, Any]:
         pdf_path = Path(pdf_path)
         if not pdf_path.exists():
@@ -105,6 +106,7 @@ class PdfToLancePipeline:
                 pdf_path=pdf_path,
                 output_dir=self.conversion_root,
                 marker_log_path=marker_log_path,
+                no_ocr=no_ocr,
             )
         else:
             self._emit_stage(f"[{paper_id}] Reusing existing Marker JSON: {marker_json_path}")
@@ -417,11 +419,18 @@ class PdfToLancePipeline:
         log_file.flush()
 
     # _run_marker calls a subProcess to run the conversion of the pdf to 
-    def _run_marker(self, *, pdf_path: Path, output_dir: Path, marker_log_path: Path) -> None:
+    def _run_marker(
+        self,
+        *,
+        pdf_path: Path,
+        output_dir: Path,
+        marker_log_path: Path,
+        no_ocr: bool = False,
+    ) -> None:
         repo_root = Path(__file__).resolve().parent.parent
         marker_script = repo_root / "marker" / "convert_single.py"
 
-        base_command =[
+        base_command = [
             sys.executable,
             str(marker_script),
             str(pdf_path),
@@ -430,6 +439,11 @@ class PdfToLancePipeline:
             "--output_format",
             "json",
         ]
+        if no_ocr:
+            base_command.append("--disable_ocr")
+            self._emit_stage(
+                f"[{pdf_path.stem}] Marker conversion configured without OCR."
+            )
 
         marker_log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -501,7 +515,7 @@ class PdfToLancePipeline:
                         f"Marker conversion interrupted for {pdf_path.name}."
                     ) from exc
 
-        # First attempt: normal Marker processing with VLM/OCR enabled
+        # First attempt: normal Marker processing, or text-layer-only mode when requested.
         succeeded, failure_reason = run_once(base_command, "w")
 
         if succeeded:

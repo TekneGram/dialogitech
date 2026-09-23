@@ -91,6 +91,7 @@ def build_paper_metadata(
     paper_id: str | None = None,
     pdf_path: str | None = None,
     markdown_path: str | None = None,
+    allow_manual: bool = False,
 ) -> PaperMetadataRecord:
     classified_json_path = Path(classified_json_path)
     marker_json_path = _resolve_marker_json_path(classified_json_path, marker_json_path)
@@ -112,7 +113,10 @@ def build_paper_metadata(
     if marker_json_path is not None:
         metadata_extractor = LLMMetadataExtractor()
         try:
-            metadata = metadata_extractor.extract_all(marker_json_path, allow_manual=False)
+            metadata = metadata_extractor.extract_all(
+                marker_json_path,
+                allow_manual=allow_manual,
+            )
         finally:
             metadata_extractor.close()
         title = metadata.get("title")

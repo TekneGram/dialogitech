@@ -318,6 +318,22 @@ Print one status update and exit:
 ./.venv/bin/python devtools/ingestion_monitor.py --once
 ```
 
+Ingest all existing classified artifacts without rerunning Gemma chunk classification:
+
+```bash
+./.venv/bin/python devtools/ingest_all_failed.py \
+  --db-path data/lancedb \
+  --replace-existing
+```
+
+`run_ingest` now prompts for missing required metadata, such as journal name and publication year, before inserting the paper. Use `--no-manual-metadata` when running noninteractively and you want missing metadata to fail instead.
+
+Preview the artifacts that would be ingested:
+
+```bash
+./.venv/bin/python devtools/ingest_all_failed.py --dry-run
+```
+
 ## Notes
 
 - The repo `.venv` is kept Marker-compatible.
@@ -345,6 +361,18 @@ Run the full pipeline over a folder of PDFs:
   --replace-existing
 ```
 
+To skip Marker OCR and use only each PDF's text layer, add `--no-ocr`:
+
+```bash
+./.venv/bin/python -m dbinsert.run_full_pipeline_folder \
+  pdfs \
+  --db-path data/lancedb \
+  --replace-existing \
+  --no-ocr
+```
+
+The same option is available on `dbinsert.run_full_pipeline` for a single PDF. It passes Marker's `--disable_ocr` option from the beginning, so the OCR/VLM server is not needed for that run. If Marker JSON already exists, add `--rerun-marker` as well; otherwise the pipeline will reuse the existing artifact.
+
 This will:
 
 - derive `paper_id` from the PDF filename
@@ -352,7 +380,7 @@ This will:
 - extract full paper metadata
 - write filtered Markdown
 - remove references and all content after the references section
-- classify chunks with deterministic rules plus Gemma fallback for unresolved chunks
+- classify every chunk with Gemma, using `unclassified` when classification fails
 - generate local Ollama embeddings with `qwen3-embedding:0.6b`
 - insert chunk rows plus metadata into LanceDB
 

@@ -39,3 +39,4 @@ class PaperTypeClassification:
   source: Literal["llm"]
   reason: str
   confidence: Literal["low", "medium", "high"] | None
+  used_context: bool = False

@@ -89,6 +89,11 @@ def main() -> None:
         help="Force rerunning Marker even if the JSON output already exists.",
     )
     parser.add_argument(
+        "--no-ocr",
+        action="store_true",
+        help="Run Marker with OCR disabled and use only the PDF text layer.",
+    )
+    parser.add_argument(
         "--rerun-filtered-markdown",
         action="store_true",
         help="Force regenerating filtered markdown even if it already exists.",
@@ -161,6 +166,7 @@ def main() -> None:
                 rerun_classification=args.rerun_classification,
                 rerun_paper_type=args.rerun_paper_type,
                 rerun_rhetorical_moves=args.rerun_rhetorical_moves,
+                no_ocr=args.no_ocr,
             )
         except Exception as exc:
             failures.append(
