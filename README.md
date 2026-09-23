@@ -8,8 +8,8 @@ The workflow is:
 2. convert the document to filtered Markdown
 3. remove references and everything after references
 4. split the Markdown into heading-based chunks
-5. classify each chunk as `abstract`, `introduction`, `method`, `results`, or `discussion`
-6. send unresolved chunks to Gemma 4 for fallback classification
+5. classify each chunk as `abstract`, `introduction`, `method`, `results`, `discussion`, or `unclassified` when classification fails
+6. classify every chunk with Gemma 4
 7. embed the chunks locally with Ollama and store them in LanceDB
 
 ## Quick Start
@@ -38,7 +38,7 @@ ollama pull qwen3-embedding:0.6b
 - `chunker/boilerplate_filter.py`: converts Marker JSON into filtered Markdown and drops references plus all trailing appendix/supplement content
 - `chunker/markdown_section_chunker.py`: splits filtered Markdown into section chunks
 - `chunker/chunk_models.py`: classified chunk and heading-split data models
-- `chunker/llm_section_classifier.py`: LLM fallback classification, quintiles, and context retrieval
+- `chunker/llm_section_classifier.py`: LLM classification, quintiles, context retrieval, and `unclassified` handling
 - `chunker/run_section_classification.py`: CLI runner for classifying a filtered Markdown file
 - `dbinsert/`: LanceDB ingestion, indexing, full-pipeline orchestration, and inspection CLIs
 - `dbquery/`: query rewriting with Gemma, hybrid/vector/FTS retrieval, reciprocal-rank fusion, batch summaries, and synthesized summaries
@@ -112,7 +112,7 @@ Working environment:
 - model:
   `unsloth/gemma-4-E4B-it-UD-MLX-4bit`
 
-If you need the optional in-process `mlx-lm` package in another environment, install:
+The normal configuration uses the external environment above. If you need the optional in-process `mlx-lm` package in another environment, install:
 
 ```bash
 python -m pip install -r requirements-mlx.txt
@@ -142,27 +142,7 @@ There are two entry points:
 1. start from an existing filtered Markdown file
 2. start from Marker JSON, then convert it to filtered Markdown before chunking/classifying
 
-## Run Deterministic Classification
-
-This uses heading-based deterministic rules only:
-
-```bash
-./.venv/bin/python -m chunker.run_section_classification \
-  marker/conversion_results/2025_Uchida/2025_Uchida_filtered.md
-```
-
-Stdout output contains one row per chunk with:
-
-- heading
-- chunk index
-- word count
-- label
-- source
-- confidence
-- whether context was used
-- reason
-
-## Run With Gemma 4 Fallback
+## Run with Gemma 4
 
 The working setup uses a separate Unsloth MLX environment:
 
@@ -171,23 +151,13 @@ The working setup uses a separate Unsloth MLX environment:
 - model:
   `unsloth/gemma-4-E4B-it-UD-MLX-4bit`
 
-Run the classifier with LLM fallback enabled for unresolved chunks:
+Gemma 4 is the standard classification path. The direct classifier requires the model path and uses the separate MLX Python environment:
 
 ```bash
 ./.venv/bin/python -m chunker.run_section_classification \
   marker/conversion_results/2025_Uchida/2025_Uchida_filtered.md \
   --model-path unsloth/gemma-4-E4B-it-UD-MLX-4bit \
   --python-executable /Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python
-```
-
-Force the LLM to classify every chunk:
-
-```bash
-./.venv/bin/python -m chunker.run_section_classification \
-  marker/conversion_results/2025_Uchida/2025_Uchida_filtered.md \
-  --model-path unsloth/gemma-4-E4B-it-UD-MLX-4bit \
-  --python-executable /Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python \
-  --force-llm
 ```
 
 ## LLM Behavior
@@ -198,9 +168,51 @@ The LLM path is controller-based:
 - if uncertain, it can request one round of context
 - context is: previous heading section + current chunk + next heading section
 - if the model requests context a second time, the classifier sends one final confirmation prompt using the previous resolved chunk label
-- the final response is normalized into the same classification metadata used by the deterministic pipeline
+- the final response is normalized into the classification metadata used by the ingestion pipeline
 
-The pipeline still refuses to insert unresolved chunks into LanceDB. If Gemma does not return a concrete label but a previous resolved chunk label exists, the run logs the LLM failure and deterministically inherits the previous label. If there is no previous resolved label available, the run still fails instead of writing incomplete data.
+Every chunk is inserted into LanceDB. If Gemma fails at every stage or returns malformed data, the chunk receives the `unclassified` category with a low-confidence fallback classification, and the failure is recorded in the classification metadata and log. There is currently no manual interface for reviewing or editing `unclassified` chunks; this is a TODO for a future version.
+
+## dbinsert and chunker
+
+This section is a development reference for the main Python files. Helper subfolders under `chunker` contain focused support classes and functions for their parent classifier or workflow; they are not listed individually here.
+
+### `chunker/`
+
+| File | Main classes / entry point | Main function |
+|---|---|---|
+| `boilerplate_filter.py` | `BoilerplateFilter`, `RemovedBlock`, `RenderedItem` | Convert Marker JSON into filtered Markdown, removing front matter noise, figures, boilerplate, references, and everything after references. |
+| `chunk_models.py` | `ClassifiedSectionChunk`, `ClassifiedHeadingSplit` | Store classified chunks and heading splits for downstream processing. |
+| `llm_metadata_extractor.py` | `LLMMetadataExtractor` | Extract paper metadata from Marker JSON with Gemma-assisted metadata decisions. |
+| `llm_paper_type_classifier.py` | `PaperTypeClassificationLLM` | Classify the overall paper type used to constrain section labels. |
+| `llm_rhetorical_move_classifier.py` | `RhetoricalMoveClassificationLLM` | Classify the rhetorical move of each already section-classified chunk. |
+| `llm_section_classifier.py` | `SectionClassificationLLM` | Classify every chunk with Gemma, request context when needed, parse responses, and fall back to `unclassified` on failure. |
+| `llm_worker.py` | `LLMWorker` | Manage requests to the external MLX Gemma runner. |
+| `markdown_section_chunker.py` | `MarkdownHeading`, `SectionChunk`, `HeadingSplit`, `MarkdownSectionChunker` | Split filtered Markdown by heading and create sentence-aware, overlapping word-count chunks. |
+| `metadata_extractor.py` | `MetadataExtractor` | Extract basic title, author, journal, and reference data from Marker JSON. |
+| `mlx_llm_runner.py` | `main()` | Read an MLX inference request from stdin and write the raw Gemma response to stdout. |
+| `run_paper_type_classification.py` | `main()` | CLI entry point for paper-type classification. |
+| `run_section_classification.py` | `main()` | CLI entry point for chunk classification from filtered Markdown. |
+
+The `chunker/llm_*_helpers/` and `chunker/llm_section_type_classifier_helpers/` subfolders contain helper models, prompt/location builders, response parsers, taxonomies, metadata flow components, and validation code for the corresponding parent classifiers.
+
+### `dbinsert/`
+
+| File | Main classes / entry point | Main function |
+|---|---|---|
+| `embedding_service.py` | `EmbeddingService`, `OllamaEmbeddingService`, `DeterministicHashEmbeddingService` | Generate embeddings for chunk text. Ollama is the normal backend; hash embeddings are for smoke tests. |
+| `full_pipeline_service.py` | `PdfToLancePipeline` | Orchestrate PDF conversion, metadata extraction, filtering, chunking, LLM classification, rhetorical-move classification, and ingestion. |
+| `index_manager.py` | `LanceIndexManager` | Create vector, full-text, and scalar LanceDB indexes idempotently. |
+| `ingest_service.py` | `ChunkIngestionService` | Serialize classified chunks, embed them, and insert them into LanceDB. |
+| `inspect_table.py` | `main()` | CLI for inspecting the LanceDB table. |
+| `lancedb_client.py` | `LanceChunkStore` | Connect to LanceDB and manage the chunk table, rows, schema columns, and paper replacement. |
+| `lancedb_schema.py` | `chunk_table_schema()` | Define the LanceDB/PyArrow schema for chunk rows. |
+| `metadata_checker.py` | `MetadataCompletenessChecker`, `InteractiveMetadataPrompter`, metadata error classes | Detect missing metadata and interactively complete it when needed. |
+| `models.py` | `PaperMetadataRecord`, `ChunkRecord`, `EmbeddedChunkRecord` | Define paper, chunk, and embedded-row data models. |
+| `paper_chunk_serializer.py` | `PaperChunkSerializer` | Convert classified heading splits and paper metadata into database chunk records. |
+| `pipeline_loader.py` | `load_classified_heading_splits()` and metadata helpers | Load classified artifacts and reconstruct the paper metadata needed for ingestion. |
+| `run_full_pipeline.py` | `main()` | CLI entry point for the end-to-end PDF-to-LanceDB pipeline. |
+| `run_full_pipeline_folder.py` | `main()` and `_discover_pdfs()` | Run the full pipeline over PDFs in a folder. |
+| `run_ingest.py` | `main()` | CLI entry point for ingesting existing classified chunk artifacts. |
 
 ## Example Pipeline From Marker JSON
 
@@ -255,6 +267,41 @@ with llm:
             content=heading_split.content,
             chunks=chunks,
         ))
+```
+
+## Resetting and running integration tests
+Should be used only during development.
+
+The reset utilities live in `devtools/`. They are deliberately destructive and require `--yes`.
+
+Reset only the LanceDB database:
+
+```bash
+./.venv/bin/python devtools/reset_lancedb.py --yes
+```
+
+Reset Marker conversion results, classification logs, query outputs, and research-session artifacts:
+
+```bash
+./.venv/bin/python devtools/reset_conversion_artifacts.py --yes
+```
+
+Reset all generated local state (data base, conversion artifacts, research-session artifacts, and DOI metadata cache):
+
+```bash
+./.venv/bin/python devtools/reset_local_environment.py --yes
+```
+
+Run the regular test suite after resetting:
+
+```bash
+./.venv/bin/python -m unittest discover -s tests
+```
+
+Run the real Gemma metadata integration test against an existing Marker artifact:
+
+```bash
+./.venv/bin/python tests/run_gemma_metadata_integration.py 2026_shi_et_al
 ```
 
 ## Notes
