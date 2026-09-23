@@ -304,6 +304,20 @@ Run the real Gemma metadata integration test against an existing Marker artifact
 ./.venv/bin/python tests/run_gemma_metadata_integration.py 2026_shi_et_al
 ```
 
+## Devtools ingestion monitoring notes
+
+Monitor the active ingestion pipeline and print its inferred stage every 10 seconds:
+
+```bash
+./.venv/bin/python devtools/ingestion_monitor.py
+```
+
+Print one status update and exit:
+
+```bash
+./.venv/bin/python devtools/ingestion_monitor.py --once
+```
+
 ## Notes
 
 - The repo `.venv` is kept Marker-compatible.
