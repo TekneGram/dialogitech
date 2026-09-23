@@ -13,6 +13,7 @@ from pathlib import Path
 from .response_parser.response_parser import ResponseParser
 from .search_services.search import SearchLanceDB
 from .cache_manager.cache_manager import CacheManager
+import json
 
 class QuestionSearch:
   def __init__(self) -> None:
@@ -31,19 +32,22 @@ class QuestionSearch:
     if conversation_number is not None:
       # Deepening the search
       current_conversation = cm.read_record(conversation_number=conversation_number)
-      excluded_chunk_ids = current_conversation["chunk_ids"]
+      excluded_chunk_ids = json.loads(current_conversation["chunk_ids"])
       data_file = current_conversation["data_file"]
       search_results = db.basic_search_exclude_chunk_ids(question_to_embed, search_limit, excluded_chunk_ids)
+      search_results_chunk_ids = [
+        row["chunk_id"] for row in search_results
+      ]
       # Update the cache
-      current_conversation_number, current_data_file = cm.append_search(conversation_number=conversation_number, data_file=data_file, search_results=search_results)
+      current_conversation_number, current_data_file = cm.append_search(conversation_number=conversation_number, data_file=data_file, search_results=search_results_chunk_ids)
     else:
       # A new search
       search_results = db.basic_search(question_to_embed, search_limit)
       # Create the cache
-      search_result_chunk_ids = [
+      search_results_chunk_ids = [
         row["chunk_id"] for row in search_results
       ]
-      current_conversation_number, current_data_file = cm.record_search(search_results=search_result_chunk_ids, query=question_to_embed)
+      current_conversation_number, current_data_file = cm.record_search(search_results=search_results_chunk_ids, query=question_to_embed)
 
 
     print("--------------------------CONVERSATION DETAILS---------------------------")
@@ -122,13 +126,3 @@ class QuestionSearch:
         row=row,
         parsed_response=parsed_response
       )
-
-      
-      
-
-    # for row in results:
-    #   print(f"distance: {row['_distance']}")
-    #   print(row["paper_title"])
-    #   print(row["section_title"])
-    #   print(row["text"])
-    #   print("---")

@@ -1,6 +1,7 @@
 import argparse
 
 from .question_search import QuestionSearch
+from .summarize_question_search import SummarizeQuestionSearch
 
 def question_search(
     question_to_embed: str, 
@@ -16,15 +17,27 @@ def question_search(
     conversation_number=conversation_number
   )
 
+def summarize_question_search(
+    conversation_number: int
+) -> None:
+  search = SummarizeQuestionSearch()
+  search.create_per_paper_summary(conversation_number)
+
 def main() -> None:
   parser = argparse.ArgumentParser(description="DialogiTech database search commands.")
   subparsers = parser.add_subparsers(dest="command", required=True)
 
+  # Create subparser commands
   question_search_parser = subparsers.add_parser(
     "question_search",
     help="Search paper chunks and ask an LLM about each result.",
   )
+  summarize_question_search_parser = subparsers.add_parser(
+    "summarize_question_search",
+    help="Create a summary of the findings after the question search."
+  )
 
+  # Create flags for question_search
   question_search_parser.add_argument(
     "--question-to-embed",
     required=True,
@@ -47,6 +60,13 @@ def main() -> None:
     help="Supply this to deepen a previous search."
   )
 
+  # Create flags for summarize_question_search
+  summarize_question_search_parser.add_argument(
+    "--conversation-number",
+    default=None,
+    help="Supply the conversation number to summarize results for that conversation"
+  )
+
   args = parser.parse_args()
   if args.command == "question_search":
     question_search(
@@ -55,6 +75,12 @@ def main() -> None:
       search_limit=args.search_limit,
       conversation_number=args.conversation_number
     )
+
+  if args.command == "summarize_question_search":
+    summarize_question_search(
+      conversation_number=args.conversation_number
+    )
+
 
 if __name__ == "__main__":
   main()

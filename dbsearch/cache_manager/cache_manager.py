@@ -222,3 +222,41 @@ class CacheManager:
 
     data_path.write_text(document, encoding="utf-8")
     return True
+
+  def read_results(self, data_file: Path | str) -> str:
+    """Read and return the Markdown text for a cached data file."""
+    data_path = self.search_results_directory / Path(data_file).name
+    if not data_path.exists():
+      raise FileNotFoundError(f"Search results data file does not exist: {data_path}")
+    if not data_path.is_file():
+      raise ValueError(f"Search results data path is not a file: {data_path}")
+
+    return data_path.read_text(encoding="utf-8")
+
+  def append_per_paper_summary(
+    self,
+    *,
+    data_file: str,
+    citation: str,
+    summary: str,
+  ) -> None:
+    """Append a generated per-paper summary to a cached Markdown file."""
+    data_path = self.search_results_directory / Path(data_file).name
+    if not data_path.exists():
+      raise FileNotFoundError(f"Search results data file does not exist: {data_path}")
+
+    document = data_path.read_text(encoding="utf-8")
+    if document and not document.endswith("\n"):
+      document += "\n"
+
+    if "## Per-paper summaries" not in document:
+      document += "\n## Per-paper summaries\n\n"
+
+    document += (
+      "### Paper citation\n\n"
+      f"{citation}\n\n"
+      "### Summary\n\n"
+      f"{summary.strip()}\n\n"
+    )
+
+    data_path.write_text(document, encoding="utf-8")
