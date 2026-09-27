@@ -137,137 +137,68 @@ Check the repo environment:
 
 ## Basic Flow
 
-There are two entry points:
+The normal end-to-end path starts with a PDF and ends with classified, embedded
+chunks in LanceDB:
 
-1. start from an existing filtered Markdown file
-2. start from Marker JSON, then convert it to filtered Markdown before chunking/classifying
+1. Marker converts the PDF to JSON, reusing an existing conversion when possible.
+2. Gemma extracts paper metadata, including optional keywords.
+3. The boilerplate filter creates Markdown and cuts the document at `References`.
+4. The paper type is classified, then the Markdown is split into heading-based chunks.
+5. Gemma classifies each chunk by section and rhetorical move.
+6. Ollama creates local embeddings, and the chunks plus paper metadata are inserted into LanceDB.
 
-## Run with Gemma 4
+The pipeline is resumable. Marker JSON, filtered Markdown, classified chunks,
+logs, and other derived artifacts are stored under
+`marker/conversion_results/<paper_id>/`. Use the `--rerun-*` flags when a
+particular stage needs to be regenerated.
 
-The working setup uses a separate Unsloth MLX environment:
+Run the full pipeline for one PDF:
 
-- Python executable:
-  `/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python`
-- model:
-  `unsloth/gemma-4-E4B-it-UD-MLX-4bit`
+```bash
+./.venv/bin/python -m dbinsert.run_full_pipeline \
+  pdfs/2025_Uchida.pdf \
+  --db-path data/lancedb \
+  --replace-existing
+```
 
-Gemma 4 is the standard classification path. The direct classifier requires the model path and uses the separate MLX Python environment:
+For a folder of PDFs, use `dbinsert.run_full_pipeline_folder`. The folder
+runner processes files sequentially and reports failures at the end of the
+batch.
+
+## Working with Gemma 4
+
+Gemma runs through the separate Unsloth MLX environment described in the setup
+section. The full pipeline supplies the configured model and Python executable
+by default. It requests context when a chunk is ambiguous and records the
+classification decision, confidence, reason, and any fallback in the artifact
+and classification log.
+
+To classify an existing filtered Markdown file directly:
 
 ```bash
 ./.venv/bin/python -m chunker.run_section_classification \
   marker/conversion_results/2025_Uchida/2025_Uchida_filtered.md \
+  --paper-type empirical_research \
   --model-path unsloth/gemma-4-E4B-it-UD-MLX-4bit \
   --python-executable /Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python
 ```
 
-## LLM Behavior
+This command is useful for inspecting section classifications. The full
+pipeline is the entry point that also performs rhetorical-move classification,
+embedding, indexing, and LanceDB insertion.
 
-The LLM path is controller-based:
+## Main pipeline components
 
-- the model sees the chunk text and which quintile of the article it comes from
-- if uncertain, it can request one round of context
-- context is: previous heading section + current chunk + next heading section
-- if the model requests context a second time, the classifier sends one final confirmation prompt using the previous resolved chunk label
-- the final response is normalized into the classification metadata used by the ingestion pipeline
+- `chunker/`: metadata extraction, filtering, heading-based chunking, paper-type classification, section classification, and rhetorical-move classification.
+- `dbinsert/`: resumable PDF orchestration, embedding, LanceDB schema and indexes, serialization, and ingestion.
+- `dbquery/`: retrieval, ranking, batch summarization, and synthesized query outputs.
+- `dbxquery/`: grounded follow-up questions over an earlier synthesized summary.
+- `resquery/`: multi-turn research sessions that reuse claims and evidence from earlier queries.
 
-Every chunk is inserted into LanceDB. If Gemma fails at every stage or returns malformed data, the chunk receives the `unclassified` category with a low-confidence fallback classification, and the failure is recorded in the classification metadata and log. There is currently no manual interface for reviewing or editing `unclassified` chunks; this is a TODO for a future version.
-
-## dbinsert and chunker
-
-This section is a development reference for the main Python files. Helper subfolders under `chunker` contain focused support classes and functions for their parent classifier or workflow; they are not listed individually here.
-
-### `chunker/`
-
-| File | Main classes / entry point | Main function |
-|---|---|---|
-| `boilerplate_filter.py` | `BoilerplateFilter`, `RemovedBlock`, `RenderedItem` | Convert Marker JSON into filtered Markdown, removing front matter noise, figures, boilerplate, references, and everything after references. |
-| `chunk_models.py` | `ClassifiedSectionChunk`, `ClassifiedHeadingSplit` | Store classified chunks and heading splits for downstream processing. |
-| `llm_metadata_extractor.py` | `LLMMetadataExtractor` | Extract paper metadata from Marker JSON with Gemma-assisted metadata decisions. |
-| `llm_paper_type_classifier.py` | `PaperTypeClassificationLLM` | Classify the overall paper type used to constrain section labels. |
-| `llm_rhetorical_move_classifier.py` | `RhetoricalMoveClassificationLLM` | Classify the rhetorical move of each already section-classified chunk. |
-| `llm_section_classifier.py` | `SectionClassificationLLM` | Classify every chunk with Gemma, request context when needed, parse responses, and fall back to `unclassified` on failure. |
-| `llm_worker.py` | `LLMWorker` | Manage requests to the external MLX Gemma runner. |
-| `markdown_section_chunker.py` | `MarkdownHeading`, `SectionChunk`, `HeadingSplit`, `MarkdownSectionChunker` | Split filtered Markdown by heading and create sentence-aware, overlapping word-count chunks. |
-| `metadata_extractor.py` | `MetadataExtractor` | Extract basic title, author, journal, and reference data from Marker JSON. |
-| `mlx_llm_runner.py` | `main()` | Read an MLX inference request from stdin and write the raw Gemma response to stdout. |
-| `run_paper_type_classification.py` | `main()` | CLI entry point for paper-type classification. |
-| `run_section_classification.py` | `main()` | CLI entry point for chunk classification from filtered Markdown. |
-
-The `chunker/llm_*_helpers/` and `chunker/llm_section_type_classifier_helpers/` subfolders contain helper models, prompt/location builders, response parsers, taxonomies, metadata flow components, and validation code for the corresponding parent classifiers.
-
-### `dbinsert/`
-
-| File | Main classes / entry point | Main function |
-|---|---|---|
-| `embedding_service.py` | `EmbeddingService`, `OllamaEmbeddingService`, `DeterministicHashEmbeddingService` | Generate embeddings for chunk text. Ollama is the normal backend; hash embeddings are for smoke tests. |
-| `full_pipeline_service.py` | `PdfToLancePipeline` | Orchestrate PDF conversion, metadata extraction, filtering, chunking, LLM classification, rhetorical-move classification, and ingestion. |
-| `index_manager.py` | `LanceIndexManager` | Create vector, full-text, and scalar LanceDB indexes idempotently. |
-| `ingest_service.py` | `ChunkIngestionService` | Serialize classified chunks, embed them, and insert them into LanceDB. |
-| `inspect_table.py` | `main()` | CLI for inspecting the LanceDB table. |
-| `lancedb_client.py` | `LanceChunkStore` | Connect to LanceDB and manage the chunk table, rows, schema columns, and paper replacement. |
-| `lancedb_schema.py` | `chunk_table_schema()` | Define the LanceDB/PyArrow schema for chunk rows. |
-| `metadata_checker.py` | `MetadataCompletenessChecker`, `InteractiveMetadataPrompter`, metadata error classes | Detect missing metadata and interactively complete it when needed. |
-| `models.py` | `PaperMetadataRecord`, `ChunkRecord`, `EmbeddedChunkRecord` | Define paper, chunk, and embedded-row data models. |
-| `paper_chunk_serializer.py` | `PaperChunkSerializer` | Convert classified heading splits and paper metadata into database chunk records. |
-| `pipeline_loader.py` | `load_classified_heading_splits()` and metadata helpers | Load classified artifacts and reconstruct the paper metadata needed for ingestion. |
-| `run_full_pipeline.py` | `main()` | CLI entry point for the end-to-end PDF-to-LanceDB pipeline. |
-| `run_full_pipeline_folder.py` | `main()` and `_discover_pdfs()` | Run the full pipeline over PDFs in a folder. |
-| `run_ingest.py` | `main()` | CLI entry point for ingesting existing classified chunk artifacts. |
-
-## Example Pipeline From Marker JSON
-
-If you already have a Marker JSON document in `marker/conversion_results/...`, the Python flow is:
-
-```python
-from pathlib import Path
-
-from chunker import BoilerplateFilter, MetadataExtractor, MarkdownSectionChunker
-from chunker.llm_section_classifier import SectionClassificationLLM
-from chunker.chunk_models import ClassifiedHeadingSplit, ClassifiedSectionChunk
-
-json_path = Path("marker/conversion_results/2025_Uchida/2025_Uchida.json")
-document = MetadataExtractor().load_json(json_path)
-metadata = MetadataExtractor().extract_all(document)
-markdown = BoilerplateFilter().convert_json_to_markdown(document, metadata=metadata)
-heading_splits = MarkdownSectionChunker().process(markdown)
-
-llm = SectionClassificationLLM(
-    filtered_markdown=markdown,
-    heading_splits=heading_splits,
-    model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
-    python_executable="/Users/danielparsons/.unsloth/unsloth_gemma4_mlx/bin/python",
-)
-
-classified = []
-with llm:
-    for heading_split in heading_splits:
-        chunks = []
-        previous_label = None
-        for chunk in heading_split.chunks:
-            classification = llm.classify_section_chunk(
-                section_chunk=chunk,
-                heading_split=heading_split,
-                paper_type="empirical_research",
-                previous_label=previous_label,
-            )
-            if classification.label is not None:
-                previous_label = classification.label
-            chunks.append(ClassifiedSectionChunk(
-                title=chunk.title,
-                heading_level=chunk.heading_level,
-                chunk_index=chunk.chunk_index,
-                text=chunk.text,
-                word_count=chunk.word_count,
-                classification=classification,
-            ))
-        classified.append(ClassifiedHeadingSplit(
-            title=heading_split.title,
-            heading_level=heading_split.heading_level,
-            raw_heading=heading_split.raw_heading,
-            content=heading_split.content,
-            chunks=chunks,
-        ))
-```
+The principal artifacts are the filtered Markdown file, classified chunk JSON,
+metadata and classification logs, and the LanceDB table. The query and research
+workflows write their own Markdown or JSON artifacts under `outputs/`,
+`search_results/`, `xoutputs/`, `resoutputs/`, and `ressessions/` as applicable.
 
 ## Resetting and running integration tests
 Should be used only during development.
@@ -416,6 +347,78 @@ It is possible to build a short literature review using a series of steps
 
 ### How to carry out a small review
 
+Run the following commands from the repository root. Each new
+`question_search` creates a conversation number and a Markdown cache file in
+`search_results/`. Record the conversation number printed by each search; it
+is needed by the summarization and review commands.
+
+First, search for the advantages and ask Gemma to judge whether each retrieved
+chunk directly answers the question:
+
+```bash
+./.venv/bin/python -m dbsearch.main question_search \
+  --question-to-embed "What are the advantages of using language models or artificial intelligence for learning a language?" \
+  --question-for-llm "Does the text directly answer the question about advantages?" \
+  --search-limit 10
+```
+
+To deepen that search, repeat the same question and provide the conversation
+number printed by the first command. Previously retrieved chunk IDs are
+excluded:
+
+```bash
+./.venv/bin/python -m dbsearch.main question_search \
+  --question-to-embed "What are the advantages of using language models or artificial intelligence for learning a language?" \
+  --question-for-llm "Does the text directly answer the question about advantages?" \
+  --search-limit 10 \
+  --conversation-number <advantages_conversation_number>
+```
+
+Create the per-paper summaries for that conversation:
+
+```bash
+./.venv/bin/python -m dbsearch.main summarize_question_search \
+  --conversation-number <advantages_conversation_number>
+```
+
+Next, run a new search for the disadvantages. Do not provide a conversation
+number here, because this should start a separate conversation:
+
+```bash
+./.venv/bin/python -m dbsearch.main question_search \
+  --question-to-embed "What are the disadvantages of using language models or artificial intelligence for learning a language?" \
+  --question-for-llm "Does the text directly answer the question about disadvantages?" \
+  --search-limit 10
+```
+
+Record the new conversation number, optionally deepen it using the same pattern
+as above, and then create its per-paper summaries:
+
+```bash
+./.venv/bin/python -m dbsearch.main summarize_question_search \
+  --conversation-number <disadvantages_conversation_number>
+```
+
+Finally, give both conversation numbers to `write_review`. The review writer
+will create a writing plan, synthesize the summaries for each conversation,
+and write a combined literature review:
+
+```bash
+./.venv/bin/python -m dbsearch.main write_review \
+  --conversation-numbers \
+  <advantages_conversation_number> \
+  <disadvantages_conversation_number>
+```
+
+The generated files are saved in `search_results/`:
+
+- `review_<timestamp>.md`: the finished review
+- `review_<timestamp>_plan.md`: the LLM-generated writing plan
+- `<timestamp>.md`: the cached search results and per-paper summaries for each conversation
+
+The review writer uses the per-paper summaries, not the raw search results.
+Therefore, run `summarize_question_search` for every conversation before
+calling `write_review`.
 
 ## Query The Database
 
