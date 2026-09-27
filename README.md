@@ -402,6 +402,21 @@ The full pipeline defaults to the working external Gemma 4 setup:
 
 You normally do not need to pass these explicitly.
 
+## Query the Database with dbsearch
+It is possible to build a short literature review using a series of steps
+1. Write a query for the database and have the LLM inspect the answer for veracity
+  - Query LanceDB: "What are the advantages of using language models or artificial intelligence for learning a language?"
+  - LLM Task: "Does the text found directly answer the question?"
+  The above queries help to ensure that retrieved information does not contain references to ideas in the text indirectly as a result of semantic similarity.
+  To deepen the search, run the exact same query again - it will automatically exclude previously semantically matched texts.
+2. Make another query:
+  - Query LanceDB: "What are the disadvantages of using language models or artificial intelligence for learning a language?"
+  - LLM Task: "Does the text found directly answer the question?"
+3. Both of the queries will be given a conversation number. By sending these two conversation numbers to the review_writer, the LLM will plan a short review that combines the queries together, summarizes all the key details from the two queries and synthesize them, creating a reference list at the bottom.
+
+### How to carry out a small review
+
+
 ## Query The Database
 
 After data has been ingested into LanceDB, query it with the `dbquery` pipeline:

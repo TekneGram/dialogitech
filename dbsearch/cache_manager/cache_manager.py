@@ -318,10 +318,13 @@ class CacheManager:
       document = document.rstrip() + "\n" + section
     data_path.write_text(document, encoding="utf-8")
 
-  def save_review(self, review: str) -> Path:
-    """Save a generated review and return its path."""
+  def save_review(self, review: str, plan: str | None = None) -> Path:
+    """Save a generated review and, optionally, its matching writing plan."""
     self.search_results_directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     review_path = self.search_results_directory / f"review_{timestamp}.md"
     review_path.write_text(review.strip() + "\n", encoding="utf-8")
+    if plan is not None:
+      plan_path = self.search_results_directory / f"review_{timestamp}_plan.md"
+      plan_path.write_text(plan.strip() + "\n", encoding="utf-8")
     return review_path

@@ -53,5 +53,18 @@ class TestBuildTitlePrompt(unittest.TestCase):
         self.assertIn('"reason"', prompt)
         self.assertIn("Return JSON only", prompt)
 
+    def test_keywords_prompts_distinguish_explicit_and_inferred_modes(self) -> None:
+        extractor = LLMMetadataExtractor()
+
+        explicit = extractor.build_keywords_prompt(self.COMPACT_JSON, mode="explicit")
+        inferred = extractor.build_keywords_prompt(self.COMPACT_JSON, mode="inferred")
+
+        self.assertIn("Do not infer topical", explicit)
+        self.assertIn("If no explicit keyword list is present", explicit)
+        self.assertIn("Infer a small", inferred)
+        self.assertIn("at most eight", inferred)
+        self.assertIn('"value"', explicit)
+        self.assertIn("Return JSON only", inferred)
+
 if __name__ == "__main__":
     unittest.main()

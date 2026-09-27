@@ -47,7 +47,7 @@ def main() -> None:
         extractor.close()
 
     print(f"Artifact: {artifact_path}")
-    for component in ("title", "journal", "authors"):
+    for component in ("title", "journal", "authors", "keywords"):
         decision = getattr(result, component)
         print(
             f"Validated Gemma {component} response:",

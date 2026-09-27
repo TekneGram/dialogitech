@@ -105,6 +105,7 @@ def build_paper_metadata(
     doi: str | None = None
     issn: str | None = None
     references: list[str] = []
+    keywords: list[str] = []
     classified_payload = json.loads(classified_json_path.read_text(encoding="utf-8"))
     paper_type_payload = classified_payload.get("paper_type")
     if not isinstance(paper_type_payload, dict) or paper_type_payload.get("label") is None:
@@ -133,6 +134,7 @@ def build_paper_metadata(
             if isinstance(raw_year, str) and raw_year.isdigit():
                 year = int(raw_year)
         references = list(metadata.get("references") or [])
+        keywords = list(metadata.get("keywords") or [])
 
     resolved_markdown_path = markdown_path or _source_markdown_from_classified_json(classified_json_path)
     resolved_paper_id = paper_id or _default_paper_id(classified_json_path, marker_json_path)
@@ -149,6 +151,7 @@ def build_paper_metadata(
         doi=doi,
         issn=issn,
         references=references,
+        keywords=keywords,
         markdown_path=resolved_markdown_path,
         marker_json_path=str(marker_json_path) if marker_json_path is not None else None,
         pdf_path=pdf_path,

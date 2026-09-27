@@ -20,6 +20,7 @@ class PaperMetadataRecord:
     doi: str | None = None
     issn: str | None = None
     references: list[str] | None = None
+    keywords: list[str] | None = None
     markdown_path: str | None = None
     marker_json_path: str | None = None
     pdf_path: str | None = None
@@ -44,6 +45,7 @@ class ChunkRecord:
     doi: str | None
     issn: str | None
     references: list[str]
+    keywords: list[str]
     section_title: str
     heading_level: int
     chunk_index: int
@@ -82,6 +84,7 @@ class EmbeddedChunkRecord:
     doi: str | None
     issn: str | None
     references: list[str]
+    keywords: list[str]
     section_title: str
     heading_level: int
     chunk_index: int

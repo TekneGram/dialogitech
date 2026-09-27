@@ -411,6 +411,7 @@ class PdfToLancePipeline:
             "title": result.title.value,
             "journal": result.journal.value,
             "authors": list(result.authors.value or []),
+            "keywords": list(result.keywords.value or []),
             "references": list(result.references),
         }
 
@@ -625,6 +626,7 @@ class PdfToLancePipeline:
         title = extracted_metadata.get("title") or paper_id
         authors = list(extracted_metadata.get("authors") or [])
         references = list(extracted_metadata.get("references") or [])
+        keywords = list(extracted_metadata.get("keywords") or [])
 
         year = None
         raw_year = journal_payload.get("year") if isinstance(journal_payload, dict) else None
@@ -642,6 +644,7 @@ class PdfToLancePipeline:
             doi=journal_payload.get("doi") if isinstance(journal_payload, dict) else None,
             issn=journal_payload.get("issn") if isinstance(journal_payload, dict) else None,
             references=references,
+            keywords=keywords,
             markdown_path=str(markdown_path),
             marker_json_path=str(marker_json_path),
             pdf_path=str(pdf_path),

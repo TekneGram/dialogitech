@@ -83,6 +83,18 @@ class MetadataResponseValidator:
           "Authors must be a list of strings or null."
         )
 
+    elif component == "keywords":
+      if value is not None and (
+        not isinstance(value, list)
+        or not all(
+          isinstance(keyword, str) and keyword.strip()
+          for keyword in value
+        )
+      ):
+        raise ValueError(
+          "Keywords must be a list of non-empty strings or null."
+        )
+
     elif component == "journal":
       if value is not None and not isinstance(value, dict):
         raise ValueError("Journal must be an object or null.")

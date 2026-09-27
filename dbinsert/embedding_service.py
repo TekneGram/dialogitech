@@ -42,6 +42,7 @@ class EmbeddingService(ABC):
                     doi=chunk.doi,
                     issn=chunk.issn,
                     references=list(chunk.references),
+                    keywords=list(chunk.keywords),
                     section_title=chunk.section_title,
                     heading_level=chunk.heading_level,
                     chunk_index=chunk.chunk_index,

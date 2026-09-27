@@ -22,6 +22,7 @@ def chunk_table_schema(vector_dim: int) -> pa.Schema:
             pa.field("doi", pa.string()),
             pa.field("issn", pa.string()),
             pa.field("references", pa.list_(pa.string()), nullable=False),
+            pa.field("keywords", pa.list_(pa.string()), nullable=False),
             pa.field("section_title", pa.string(), nullable=False),
             pa.field("heading_level", pa.int32(), nullable=False),
             pa.field("chunk_index", pa.int32(), nullable=False),

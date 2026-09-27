@@ -119,6 +119,61 @@ class TestLLMMetadataExtractorUnit(unittest.TestCase):
         result = CompleteExtractor().extract_all(document, allow_manual=False)
         self.assertEqual(result["references"], ["Smith, J. (2020). Journal of Testing, 1, 2-3."])
 
+    def test_keywords_use_explicit_pages_then_infer_from_early_article(self) -> None:
+        document = {
+            "children": [
+                {
+                    "id": f"/page/{page_number}/Page/{page_number}",
+                    "children": [
+                        {"block_type": "Text", "html": f"<p>Page {page_number}</p>"},
+                    ],
+                }
+                for page_number in range(5)
+            ]
+        }
+
+        class KeywordExtractor(LLMMetadataExtractor):
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls: list[tuple[str, list[int]]] = []
+
+            def _extract_component(self, component, compact_json):
+                pages = [page["page_number"] for page in compact_json["pages"]]
+                self.calls.append((compact_json.get("__keyword_mode", "metadata"), pages))
+                if compact_json.get("__keyword_mode") == "explicit":
+                    value = []
+                else:
+                    value = ["large language models", "CEFR", "CEFR"]
+                return MetadataDecision(
+                    value=value,
+                    confidence="medium",
+                    reason="Test keyword response",
+                    source_pages=pages,
+                )
+
+        extractor = KeywordExtractor()
+        decision = extractor.extract_component(document, "keywords", allow_manual=False)
+
+        self.assertEqual(decision.value, ["large language models", "CEFR"])
+        self.assertEqual(decision.provenance["value"], ["gemma", "inferred_from_article"])
+        self.assertEqual(
+            extractor.calls,
+            [
+                ("explicit", [0, 1]),
+                ("inferred", [0, 1, 2, 3, 4]),
+            ],
+        )
+
+    def test_keyword_extraction_returns_empty_without_pages(self) -> None:
+        decision = self.extractor.extract_component(
+            {"children": []},
+            "keywords",
+            allow_manual=False,
+        )
+
+        self.assertEqual(decision.value, [])
+        self.assertEqual(decision.source_pages, [])
+
 
 class TestLLMMetadataExtractorIntegration(unittest.TestCase):
     ARTIFACT_PATH = Path(__file__).resolve().parents[1] / (

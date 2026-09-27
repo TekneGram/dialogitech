@@ -25,6 +25,7 @@ class LLMMetadataExtractor:
   from the json file returned after extraction by marker:
     - title
     - authors: [ "...", "..." ]
+    - keywords: [ "..." ]
     - references: [ "...", "..." ] (deterministically extracted from the Marker references section)
     - journal: {
         "name" : "...",
@@ -98,6 +99,7 @@ class LLMMetadataExtractor:
         title=decisions["title"],
         journal=decisions["journal"],
         authors=decisions["authors"],
+        keywords=self._extract_keywords(document),
         references=self.reference_extractor.extract(document),
     )
 
@@ -113,6 +115,7 @@ class LLMMetadataExtractor:
         "title": result.title.value,
         "journal": result.journal.value,
         "authors": result.authors.value or [],
+        "keywords": list(result.keywords.value or []),
         "references": result.references,
     }
 
@@ -123,6 +126,10 @@ class LLMMetadataExtractor:
       *,
       allow_manual: bool = True,
   ) -> MetadataDecision:
+    if component == "keywords":
+      document = self.load_marker_json(source)
+      return self._extract_keywords(document)
+
     if component not in {"title", "journal", "authors"}:
       raise ValueError(f"Unsupported metadata component: {component}")
 
@@ -170,7 +177,65 @@ class LLMMetadataExtractor:
   ) -> dict[str, list[dict[str, Any]]]:
     return self.evidence.compact_pages(pages)
 
-  # Three separate prompts for the three metadata fields
+  def build_keywords_prompt(
+      self,
+      compact_json: dict[str, Any],
+      *,
+      mode: str = "explicit",
+  ) -> str:
+    evidence_json = json.dumps(
+        {
+            key: value
+            for key, value in compact_json.items()
+            if not key.startswith("__")
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    if mode == "explicit":
+      instructions = """
+      Extract only keywords explicitly presented by the authors or publisher.
+      Recognize labels such as Keywords, Key words, Key terms, Index terms, and
+      Descriptors, even when formatting is irregular. Do not infer topical
+      keywords in this pass. If no explicit keyword list is present, return an
+      empty list.
+      """
+      reason_example = "The terms appear in an explicit keyword list."
+    else:
+      instructions = """
+      No explicit keyword list was found in the opening pages. Infer a small
+      set of useful topical keywords from the title, abstract, introduction,
+      and early substantive discussion. Prefer central, repeated terms useful
+      for research retrieval. Do not invent unsupported methods, findings,
+      populations, or claims. Return at most eight keywords.
+      """
+      reason_example = "No explicit list was found; these terms are supported by the early article text."
+
+    return f"""
+      Identify keywords from the supplied Marker page data.
+
+      Rules:
+      - Use only the supplied JSON evidence.
+      - Normalize whitespace and remove duplicate keywords.
+      - Return a list of non-empty strings.
+      - If no keywords can be found, return an empty list rather than null.
+      - Confidence must be exactly one of "high", "medium", or "low".
+      - Return JSON only. Do not include Markdown or commentary.
+
+      {instructions.strip()}
+
+      Required JSON format:
+      {{
+        "value": ["keyword one", "keyword two"],
+        "confidence": "medium",
+        "reason": "{reason_example}"
+      }}
+
+      Marker page data:
+      {evidence_json}
+    """.strip()
+
+  # Prompts for the individual metadata fields
   def build_title_prompt(self, compact_json) -> str:
     """
     Returns
@@ -345,4 +410,91 @@ class LLMMetadataExtractor:
       component: str,
       compact_json: dict[str, Any],
   ) -> MetadataDecision:
+    if component == "keywords":
+      mode = str(compact_json.get("__keyword_mode", "explicit"))
+      return self.component_runner.extract(
+          component,
+          compact_json,
+          prompt_builder=lambda data: self.build_keywords_prompt(data, mode=mode),
+      )
     return self.component_runner.extract(component, compact_json)
+
+  def _extract_keywords(self, document: dict[str, Any]) -> MetadataDecision:
+    """Extract explicit keywords, then infer them if the opening pages have none."""
+    initial_pages = self.evidence.select_available_pages(document, [0, 1])
+    if not initial_pages:
+      return MetadataDecision(
+          value=[],
+          confidence="low",
+          reason="No Marker pages were available for keyword extraction.",
+          source_pages=[],
+          provenance={},
+      )
+
+    initial_json = self.evidence.compact_pages(initial_pages)
+    try:
+      explicit_json = dict(initial_json)
+      explicit_json["__keyword_mode"] = "explicit"
+      explicit = self._extract_component("keywords", explicit_json)
+      explicit_values = self._normalize_keywords(explicit.value)
+      if explicit_values:
+        return MetadataDecision(
+            value=explicit_values,
+            confidence=explicit.confidence,
+            reason=explicit.reason,
+            source_pages=explicit.source_pages,
+            provenance={"value": ["gemma", "explicit_keyword_list"]},
+        )
+    except Exception as exc:
+      self._log_event(f"Explicit keyword extraction failed: {type(exc).__name__}: {exc}")
+
+    additional_pages = self.evidence.select_available_pages(document, [2, 3, 4])
+    expanded_pages = initial_pages + [
+        page for page in additional_pages if page not in initial_pages
+    ]
+    expanded_json = self.evidence.compact_pages(expanded_pages)
+    try:
+      expanded_json["__keyword_mode"] = "inferred"
+      inferred = self._extract_component("keywords", expanded_json)
+      inferred_values = self._normalize_keywords(inferred.value)
+      return MetadataDecision(
+          value=inferred_values,
+          confidence=inferred.confidence,
+          reason=(
+              inferred.reason
+              if inferred_values
+              else "No explicit or inferable keywords were found."
+          ),
+          source_pages=inferred.source_pages or [
+              page["page_number"] for page in expanded_pages
+          ],
+          provenance=(
+              {"value": ["gemma", "inferred_from_article"]}
+              if inferred_values else {}
+          ),
+      )
+    except Exception as exc:
+      self._log_event(f"Inferred keyword extraction failed: {type(exc).__name__}: {exc}")
+      return MetadataDecision(
+          value=[],
+          confidence="low",
+          reason="Keyword extraction did not produce a usable result.",
+          source_pages=[page["page_number"] for page in expanded_pages],
+          provenance={},
+      )
+
+  @staticmethod
+  def _normalize_keywords(value: Any) -> list[str]:
+    if not isinstance(value, list):
+      return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+      if not isinstance(item, str):
+        continue
+      keyword = " ".join(item.split()).strip()
+      key = keyword.casefold()
+      if keyword and key not in seen:
+        normalized.append(keyword)
+        seen.add(key)
+    return normalized

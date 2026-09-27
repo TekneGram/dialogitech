@@ -15,4 +15,5 @@ class MetadataExtractionResult:
   title: MetadataDecision
   journal: MetadataDecision
   authors: MetadataDecision
+  keywords: MetadataDecision
   references: list[str] = field(default_factory=list)

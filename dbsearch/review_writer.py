@@ -49,7 +49,7 @@ class ReviewWriter:
       ),
       max_tokens=2000,
     )
-    review_path = self.cm.save_review(review)
+    review_path = self.cm.save_review(review, plan=review_plan)
     print(f"Review saved to {review_path}")
     return review_path
 
@@ -72,7 +72,7 @@ class ReviewWriter:
       system_prompt=(
         "You will receive some queries asked by a user and examples of "
         "responses. Your task is to make a writing plan. Here is an example "
-        "of a plan: ‘write a review which contrasts the advantages and "
+        "of a plan: ‘Write a review which contrasts the advantages and "
         "disadvantages of X. Write one paragraph on the advantages and one "
         "paragraph on the disadvantages.’"
       ),

@@ -25,13 +25,14 @@ class MetadataComponentRunner:
       self,
       component: str,
       compact_json: dict[str, Any],
+      prompt_builder: Callable[[dict[str, Any]], str] | None = None,
   ) -> MetadataDecision:
-    prompt_builder = self.prompt_builders.get(component)
-    if prompt_builder is None:
+    selected_prompt_builder = prompt_builder or self.prompt_builders.get(component)
+    if selected_prompt_builder is None:
       raise ValueError(f"Unsupported metadata component: {component}")
 
     raw_response = self.generate([
-        {"role": "user", "content": prompt_builder(compact_json)}
+        {"role": "user", "content": selected_prompt_builder(compact_json)}
     ])
     payload = self.validator.parse_json_response(raw_response)
     decision = self.validator.validate_decision(payload, component)

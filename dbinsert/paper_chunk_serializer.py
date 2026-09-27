@@ -38,6 +38,7 @@ class PaperChunkSerializer:
                         doi=paper_metadata.doi,
                         issn=paper_metadata.issn,
                         references=list(paper_metadata.references or []),
+                        keywords=list(paper_metadata.keywords or []),
                         section_title=chunk.title,
                         heading_level=chunk.heading_level,
                         chunk_index=chunk.chunk_index,
