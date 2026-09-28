@@ -76,8 +76,8 @@ class SectionLocationBuilder:
             search_start = section_end
         return ranges
 
-    def build_chunk_locations(self) -> dict[tuple[str, int], ChunkLocation]:
-        locations: dict[tuple[str, int], ChunkLocation] = {}
+    def build_chunk_locations(self) -> dict[tuple[int, int], ChunkLocation]:
+        locations: dict[tuple[int, int], ChunkLocation] = {}
         for section_index, heading_split in enumerate(self.heading_splits):
             section_start, section_end = self.section_ranges[section_index]
             section_text = self.filtered_markdown[section_start:section_end]
@@ -100,8 +100,11 @@ class SectionLocationBuilder:
                     local_end = local_start + len(chunk.text)
                     article_start = section_start + local_start
                     article_end = section_start + local_end
-                    section_search_start = max(local_end, local_start + 1)
-                locations[(heading_split.title, chunk.chunk_index)] = ChunkLocation(
+                    # Chunks intentionally overlap. Search the next chunk from
+                    # the previous chunk's start, not its end, so its overlap
+                    # remains searchable.
+                    section_search_start = local_start + 1
+                locations[(section_index, chunk.chunk_index)] = ChunkLocation(
                     article_start=article_start,
                     article_end=article_end,
                     quintile=self.article_quintile(
@@ -114,7 +117,8 @@ class SectionLocationBuilder:
         return locations
 
     def location_for(self, *, chunk: SectionChunk, heading_split: HeadingSplit) -> ChunkLocation:
-        key = (heading_split.title, chunk.chunk_index)
+        section_index = self._section_index_for(heading_split)
+        key = (section_index, chunk.chunk_index)
         location = self.chunk_locations.get(key)
         if location is not None:
             return location
@@ -130,7 +134,6 @@ class SectionLocationBuilder:
                 section_index=0,
             )
 
-        section_index = self._section_index_for(heading_split)
         section_start, section_end = self.section_ranges[section_index]
         self._log_fallback(
             f"location for heading {heading_split.title!r}, chunk {chunk.chunk_index} was missing; "
@@ -194,7 +197,10 @@ class SectionLocationBuilder:
 
     def _section_index_for(self, heading_split: HeadingSplit) -> int:
         for index, candidate in enumerate(self.heading_splits):
-            if candidate is heading_split or candidate.title == heading_split.title:
+            if candidate is heading_split:
+                return index
+        for index, candidate in enumerate(self.heading_splits):
+            if candidate.title == heading_split.title:
                 return index
         return 0
 

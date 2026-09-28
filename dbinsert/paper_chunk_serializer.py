@@ -18,14 +18,14 @@ class PaperChunkSerializer:
             raise RuntimeError("Cannot serialize chunks without a resolved paper-type classification.")
         chunk_records: list[ChunkRecord] = []
 
-        for split in classified_splits:
+        for section_index, split in enumerate(classified_splits):
             for chunk in split.chunks:
                 rhetorical_result = chunk.rhetorical_move_result
                 chunk_records.append(
                     ChunkRecord(
                         chunk_id=self.make_chunk_id(
                             paper_id=paper_metadata.paper_id,
-                            section_title=chunk.title,
+                            section_index=section_index,
                             chunk_index=chunk.chunk_index,
                         ),
                         paper_id=paper_metadata.paper_id,
@@ -83,8 +83,8 @@ class PaperChunkSerializer:
     def make_chunk_id(
         self,
         paper_id: str,
-        section_title: str,
+        section_index: int,
         chunk_index: int,
     ) -> str:
-        payload = f"{paper_id}\n{section_title}\n{chunk_index}"
+        payload = f"{paper_id}\n{section_index}\n{chunk_index}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
