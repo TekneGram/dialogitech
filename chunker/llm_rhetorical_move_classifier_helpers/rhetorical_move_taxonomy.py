@@ -16,6 +16,7 @@ ALL_RHETORICAL_MOVES: tuple[RhetoricalMoveLabel, ...] = (
 )
 
 SECTION_ALLOWED_MOVES: dict[SectionLabel, tuple[RhetoricalMoveLabel, ...]] = {
+    "front_matter": (),
     "abstract": (
         "establish_topic_importance", "provide_background", "identify_literature_gap",
         "state_gap_response", "state_objective_or_aim", "state_research_questions",

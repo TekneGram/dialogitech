@@ -5,6 +5,7 @@ from typing import Literal
 from chunker.llm_paper_type_classifier_helpers.paper_type_models import PaperType
 
 SectionLabel = Literal[
+    "front_matter",
     "abstract",
     "introduction",
     "method",
@@ -23,21 +24,25 @@ SectionLabel = Literal[
 ]
 
 PAPER_TYPE_ALLOWED_SECTIONS: dict[PaperType, tuple[SectionLabel, ...]] = {
-    "empirical_research": ("abstract", "introduction", "method", "results", "discussion"),
-    "literature_review": ("abstract", "introduction", "review_method", "literature_synthesis", "discussion"),
-    "systematic_review_or_meta_analysis": ("abstract", "introduction", "review_method", "results", "discussion"),
-    "theoretical_or_conceptual": ("abstract", "introduction", "conceptual_framework", "argument_or_analysis", "discussion"),
-    "position_or_discussion_paper": ("abstract", "introduction", "argument_or_analysis", "discussion"),
-    "methodological_paper": ("abstract", "introduction", "method", "evaluation_or_example", "discussion"),
-    "pedagogical_or_practice_paper": ("abstract", "introduction", "practice_description", "evaluation_or_example", "discussion"),
-    "argumentative_essay": ("abstract", "introduction", "argument_or_analysis", "discussion"),
+    "empirical_research": ("front_matter", "abstract", "introduction", "method", "results", "discussion"),
+    "literature_review": ("front_matter", "abstract", "introduction", "review_method", "literature_synthesis", "discussion"),
+    "systematic_review_or_meta_analysis": ("front_matter", "abstract", "introduction", "review_method", "results", "discussion"),
+    "theoretical_or_conceptual": ("front_matter", "abstract", "introduction", "conceptual_framework", "argument_or_analysis", "discussion"),
+    "position_or_discussion_paper": ("front_matter", "abstract", "introduction", "argument_or_analysis", "discussion"),
+    "methodological_paper": ("front_matter", "abstract", "introduction", "method", "evaluation_or_example", "discussion"),
+    "pedagogical_or_practice_paper": ("front_matter", "abstract", "introduction", "practice_description", "evaluation_or_example", "discussion"),
+    "argumentative_essay": ("front_matter", "abstract", "introduction", "argument_or_analysis", "discussion"),
     "other_or_unclear": (
-        "abstract", "introduction", "background_or_review", "method_or_approach",
+        "front_matter", "abstract", "introduction", "background_or_review", "method_or_approach",
         "analysis_or_argument", "discussion_or_conclusion",
     ),
 }
 
 SECTION_LABEL_DESCRIPTIONS: dict[SectionLabel, str] = {
+    "front_matter": (
+        "publication, editorial, conference, author-information, copyright, preface, "
+        "acknowledgement, keyword, or other non-substantive material before the paper body"
+    ),
     "abstract": "compact overview of the paper",
     "introduction": "background, literature positioning, gap, aims, or research questions",
     "method": "original-study design, data, materials, procedures, or analysis",

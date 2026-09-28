@@ -30,6 +30,8 @@ class SectionClassificationLLM:
       Rules:
       - Return JSON only.
       - Use exactly one of the allowed labels when classifying.
+      - Use front_matter for publication, editorial, conference, author-information, copyright, preface, acknowledgement, keyword, or other administrative material that is not part of the paper's substantive argument.
+      - Do not label front matter as abstract or introduction merely because it appears near the beginning of the article.
       - If the chunk is ambiguous or you are not confident enough, request context instead of guessing.
       - Confidence must be one of: low, medium, high.
 
@@ -227,6 +229,7 @@ class SectionClassificationLLM:
                 f"Heading: {heading_split.title}",
                 f"It's position in the article is: {chunk_location.quintile}",
                 "Decide whether the chunk should be labeled as one of the allowed labels.",
+                "Use front_matter for publication or administrative material rather than forcing it into abstract or introduction.",
                 "If the chunk is ambiguous or you are not confident, return action=request_context.",
                 "Chunk:",
                 chunk.text,
@@ -251,7 +254,8 @@ class SectionClassificationLLM:
                 *[f"- {label}: {SECTION_LABEL_DESCRIPTIONS[label]}" for label in allowed_labels],
                 f"Heading: {heading_split.title}",
                 f"It's position in the article is: {chunk_location.quintile}",
-                "Decide whether the chunk should be labeled as one of the allowed labels."
+                "Decide whether the chunk should be labeled as one of the allowed labels.",
+                "Use front_matter for publication or administrative material rather than forcing it into abstract or introduction.",
                 "Chunk:",
                 previous_section,
                 context.current_chunk,
@@ -267,6 +271,7 @@ class SectionClassificationLLM:
               Rules:
               - Return JSON only.
               - Use exactly one of the allowed labels when classifying.
+              - Use front_matter for publication or administrative material rather than forcing it into abstract or introduction.
               - You *must* provide a classification.
               - Confidence must be one of: low, medium, high.
 
@@ -278,6 +283,7 @@ class SectionClassificationLLM:
           Rules:
           - Return JSON only.
           - Use exactly one of the allowed labels when classifying.
+          - Use front_matter for publication or administrative material rather than forcing it into abstract or introduction.
           - You *must* provide a classification.
           - Confidence must be one of: low, medium, high.
 
@@ -300,6 +306,7 @@ class SectionClassificationLLM:
                 *[f"- {label}: {SECTION_LABEL_DESCRIPTIONS[label]}" for label in allowed_labels],
                 f"Heading: {heading_split.title}",
                 f"Article position: {chunk_location.quintile}",
+                "Use front_matter for publication or administrative material rather than forcing it into abstract or introduction.",
                 "Chunk:",
                 chunk.text,
             ]

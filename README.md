@@ -8,7 +8,7 @@ The workflow is:
 2. convert the document to filtered Markdown
 3. remove references and everything after references
 4. split the Markdown into heading-based chunks
-5. classify each chunk as `abstract`, `introduction`, `method`, `results`, `discussion`, or `unclassified` when classification fails
+5. classify each chunk as `front_matter`, `abstract`, `introduction`, `method`, `results`, `discussion`, or another paper-type-specific section label
 6. classify every chunk with Gemma 4
 7. embed the chunks locally with Ollama and store them in LanceDB
 
@@ -38,7 +38,7 @@ ollama pull qwen3-embedding:0.6b
 - `chunker/boilerplate_filter.py`: converts Marker JSON into filtered Markdown and drops references plus all trailing appendix/supplement content
 - `chunker/markdown_section_chunker.py`: splits filtered Markdown into section chunks
 - `chunker/chunk_models.py`: classified chunk and heading-split data models
-- `chunker/llm_section_classifier.py`: LLM classification, quintiles, context retrieval, and `unclassified` handling
+- `chunker/llm_section_classifier.py`: LLM classification, quintiles, context retrieval, and `front_matter`/`unclassified` handling
 - `chunker/run_section_classification.py`: CLI runner for classifying a filtered Markdown file
 - `dbinsert/`: LanceDB ingestion, indexing, full-pipeline orchestration, and inspection CLIs
 - `dbquery/`: query rewriting with Gemma, hybrid/vector/FTS retrieval, reciprocal-rank fusion, batch summaries, and synthesized summaries
@@ -311,7 +311,7 @@ This will:
 - extract full paper metadata
 - write filtered Markdown
 - remove references and all content after the references section
-- classify every chunk with Gemma, using `unclassified` when classification fails
+- classify every chunk with Gemma, using `front_matter` for non-substantive publication material and `unclassified` only when classification fails
 - generate local Ollama embeddings with `qwen3-embedding:0.6b`
 - insert chunk rows plus metadata into LanceDB
 

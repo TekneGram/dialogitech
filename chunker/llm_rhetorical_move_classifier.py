@@ -27,6 +27,7 @@ class RhetoricalMoveClassificationLLM:
     SYSTEM_PROMPT = """You identify rhetorical moves in chunks from academic articles.
 
       Return JSON only. Select one to three move labels from the allowed labels supplied by the user.
+      For front_matter, no rhetorical move applies and the classifier should not be called.
       Order moves from primary to secondary. Do not invent labels.
       Every move needs a confidence of low, medium, or high and a short reason.
 
@@ -72,6 +73,14 @@ class RhetoricalMoveClassificationLLM:
         heading_split: HeadingSplit,
         section_label: ClassificationLabel,
     ) -> RhetoricalMoveResult:
+        if section_label == "front_matter":
+            reason = "Front matter is non-substantive publication or administrative material; no rhetorical move applies."
+            self._log_event(f"{self._chunk_ref(chunk=chunk, heading_split=heading_split)} {reason}")
+            return RhetoricalMoveResult(
+                moves=[],
+                used_context=False,
+                reason=reason,
+            )
         allowed = allowed_moves(section_label)
         location = self._chunk_location(chunk, heading_split)
         chunk_ref = self._chunk_ref(chunk=chunk, heading_split=heading_split)
@@ -235,6 +244,12 @@ class RhetoricalMoveClassificationLLM:
                 raise RuntimeError(f"Unsupported rhetorical-move confidence: {confidence!r}")
             moves.append(RhetoricalMoveClassification(label=label, confidence=confidence, reason=reason))
         if not moves:
+            if section_label == "front_matter":
+                return RhetoricalMoveResult(
+                    moves=[],
+                    used_context=used_context,
+                    reason=str(payload.get("reason") or "front matter has no rhetorical move").strip(),
+                )
             raise RuntimeError("Rhetorical-move response contained no classifications.")
         result = RhetoricalMoveResult(
             moves=moves,
