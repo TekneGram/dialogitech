@@ -94,6 +94,10 @@ def main() -> None:
         help="Run Marker with OCR disabled and use only the PDF text layer.",
     )
     parser.add_argument(
+        "--text-quality-config",
+        help="JSON configuration file containing no-OCR text-quality thresholds.",
+    )
+    parser.add_argument(
         "--rerun-filtered-markdown",
         action="store_true",
         help="Force regenerating filtered markdown even if it already exists.",
@@ -145,6 +149,7 @@ def main() -> None:
         conversion_root=Path(args.conversion_root),
         min_words=args.min_words,
         overlap_words=args.overlap_words,
+        text_quality_config_path=args.text_quality_config,
     )
 
     total_pdfs = len(pdf_paths)

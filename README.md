@@ -315,6 +315,16 @@ This will:
 - generate local Ollama embeddings with `qwen3-embedding:0.6b`
 - insert chunk rows plus metadata into LanceDB
 
+When `--no-ocr` is used, the pipeline checks the resulting Marker JSON for
+very low text recovery before starting metadata extraction and classification.
+If the document appears to be image-based, an interactive run offers to rerun
+that paper with OCR. In non-interactive or folder runs, the paper is reported
+as failed and can be rerun without `--no-ocr`.
+
+The thresholds are editable in `dbinsert/text_quality_config.json`. Supply an
+alternative JSON file with `--text-quality-config` on either full-pipeline
+runner when a different document collection needs different thresholds.
+
 The folder runner processes PDFs sequentially. If one PDF fails, the error is printed and recorded in the final batch summary, and the run continues with the remaining files. The command exits non-zero at the end if any file failed.
 
 If required metadata is missing after Marker extraction, the pipeline pauses and asks for manual terminal input for:

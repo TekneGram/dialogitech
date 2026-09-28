@@ -1,0 +1,7 @@
+{
+  "minimum_pages_for_sparse_check": 2,
+  "minimum_total_words": 100,
+  "maximum_text_page_ratio": 0.5,
+  "maximum_words_on_page": 100,
+  "maximum_words_per_page_ratio": 10.0
+}

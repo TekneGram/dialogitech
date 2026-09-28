@@ -9,7 +9,7 @@ import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from chunker.boilerplate_filter import BoilerplateFilter
 from chunker.llm_section_classifier import SectionClassificationLLM
@@ -35,6 +35,12 @@ from .metadata_checker import (
 )
 from .models import PaperMetadataRecord
 from .pipeline_loader import load_classified_heading_splits
+from .text_quality_checker import (
+    MarkerTextQualityChecker,
+    OcrRequiredError,
+    TextExtractionQuality,
+    TextQualityThresholds,
+)
 
 
 DEFAULT_GEMMA_MODEL_PATH = "unsloth/gemma-4-E4B-it-UD-MLX-4bit"
@@ -51,11 +57,17 @@ class PdfToLancePipeline:
         conversion_root: str | Path,
         min_words: int = 200,
         overlap_words: int = 50,
+        text_quality_config_path: str | Path | None = None,
+        ocr_prompt_fn: Callable[[str], str] | None = None,
     ) -> None:
         self.ingestion_service = ingestion_service
         self.conversion_root = Path(conversion_root)
         self.min_words = min_words
         self.overlap_words = overlap_words
+        self.text_quality_checker = MarkerTextQualityChecker(
+            TextQualityThresholds.from_path(text_quality_config_path)
+        )
+        self.ocr_prompt_fn = ocr_prompt_fn
         self.metadata_checker = MetadataCompletenessChecker()
         self.metadata_prompter = InteractiveMetadataPrompter()
 
@@ -90,6 +102,7 @@ class PdfToLancePipeline:
         marker_log_path = artifact_dir / f"{paper_id}_marker.log"
         classification_log_path = artifact_dir / f"{paper_id}_classification.log"
         metadata_trace_log_path = artifact_dir / f"{paper_id}_metadata_trace.log"
+        text_quality_path = artifact_dir / f"{paper_id}_text_quality.json"
 
         # Prepare model paths and print to the screen that the pipeline has started
         resolved_model_path = model_path or DEFAULT_GEMMA_MODEL_PATH
@@ -114,6 +127,42 @@ class PdfToLancePipeline:
         if not marker_json_path.exists():
             raise RuntimeError(f"Marker did not produce the expected JSON output: {marker_json_path}")
 
+        document = json.loads(marker_json_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise RuntimeError(f"Marker JSON root must be an object: {marker_json_path}")
+
+        if no_ocr:
+            quality = self.text_quality_checker.inspect(document)
+            self._write_text_quality_report(text_quality_path, quality)
+            if quality.likely_requires_ocr:
+                if not self._prompt_for_ocr(pdf_path=pdf_path, quality=quality):
+                    raise OcrRequiredError(
+                        f"[{paper_id}] No-OCR extraction produced too little text; user declined OCR.",
+                        quality,
+                    )
+
+                self._emit_stage(f"[{paper_id}] Rerunning Marker with OCR enabled.")
+                self._run_marker(
+                    pdf_path=pdf_path,
+                    output_dir=self.conversion_root,
+                    marker_log_path=marker_log_path,
+                    no_ocr=False,
+                )
+                document = json.loads(marker_json_path.read_text(encoding="utf-8"))
+                if not isinstance(document, dict):
+                    raise RuntimeError(f"Marker JSON root must be an object: {marker_json_path}")
+                quality = self.text_quality_checker.inspect(document)
+                self._write_text_quality_report(text_quality_path, quality)
+                if quality.likely_requires_ocr:
+                    raise OcrRequiredError(
+                        f"[{paper_id}] OCR conversion still produced too little text.",
+                        quality,
+                    )
+                rerun_filtered_markdown = True
+                rerun_classification = True
+                rerun_paper_type = True
+                rerun_rhetorical_moves = True
+
         # Start the analysis and extraction of data from the Marker artifacts
         self._emit_stage(f"[{paper_id}] Loading Marker JSON.")
         metadata_log_path = artifact_dir / f"{paper_id}_metadata.log"
@@ -129,7 +178,6 @@ class PdfToLancePipeline:
                 ),
             )
             try:
-                document = metadata_extractor.load_marker_json(marker_json_path)
                 extracted_result = metadata_extractor.extract_metadata(document)
                 extracted_metadata = self._metadata_result_to_dict(extracted_result)
             finally:
@@ -339,8 +387,38 @@ class PdfToLancePipeline:
             "classification_log_path": str(classification_log_path),
             "metadata_log_path": str(metadata_log_path),
             "metadata_trace_log_path": str(metadata_trace_log_path),
+            "text_quality_path": str(text_quality_path),
             "inserted_chunks": inserted_count,
         }
+
+    def _prompt_for_ocr(
+        self,
+        *,
+        pdf_path: Path,
+        quality: TextExtractionQuality,
+    ) -> bool:
+        self._emit_stage(
+            f"[{pdf_path.stem}] No-OCR extraction produced little text: "
+            f"{quality.total_words} words across {quality.text_pages}/{quality.page_count} pages."
+        )
+        prompt = (
+            f"The no-OCR conversion of {pdf_path.name} produced only "
+            f"{quality.total_words} words across {quality.text_pages} of "
+            f"{quality.page_count} pages. This paper may require OCR. "
+            "Rerun this paper with OCR? [y/N]: "
+        )
+        if self.ocr_prompt_fn is None and not sys.stdin.isatty():
+            self._emit_stage(
+                f"[{pdf_path.stem}] OCR is required, but no interactive terminal is available. "
+                "Rerun without --no-ocr."
+            )
+            return False
+        answer = (self.ocr_prompt_fn or input)(prompt).strip().lower()
+        return answer in {"y", "yes"}
+
+    @staticmethod
+    def _write_text_quality_report(path: Path, quality: TextExtractionQuality) -> None:
+        path.write_text(json.dumps(quality.as_dict(), indent=2), encoding="utf-8")
 
     def _ensure_required_metadata(
         self,
