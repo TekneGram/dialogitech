@@ -78,6 +78,111 @@ class AlwaysMissingExtractor(LLMMetadataExtractor):
 
 
 class TestMetadataFlow(unittest.TestCase):
+    def test_crossref_search_fills_missing_doi_before_manual_input(self) -> None:
+        class SearchDoiClient:
+            def search(self, *, title: str, authors) -> dict:
+                self.search_args = (title, authors)
+                return {
+                    "doi": "10.1234/found",
+                    "title": title,
+                    "authors": authors,
+                    "journal": "Found Journal",
+                    "year": "2025",
+                }
+
+        doi_client = SearchDoiClient()
+
+        class SearchExtractor(LLMMetadataExtractor):
+            def _extract_component(self, component, compact_json):
+                if component == "title":
+                    value = "A paper title"
+                elif component == "authors":
+                    value = ["Ada Lovelace"]
+                elif "doi_metadata" in compact_json:
+                    value = {
+                        "name": compact_json["doi_metadata"]["journal"],
+                        "year": compact_json["doi_metadata"]["year"],
+                        "doi": compact_json["doi_metadata"]["doi"],
+                    }
+                else:
+                    value = {"name": None, "year": "2025", "doi": "unknown"}
+                return MetadataDecision(
+                    value=value,
+                    confidence="high",
+                    reason="Test response",
+                    source_pages=[0, 1],
+                )
+
+        extractor = SearchExtractor(
+            input_fn=lambda prompt: (_ for _ in ()).throw(
+                AssertionError("Manual input should not be requested")
+            ),
+            doi_metadata_client=doi_client,
+        )
+
+        result = extractor.extract_metadata(marker_document())
+
+        self.assertEqual(doi_client.search_args, ("A paper title", ["Ada Lovelace"]))
+        self.assertEqual(result.journal.value["doi"], "10.1234/found")
+        self.assertEqual(result.journal.value["name"], "Found Journal")
+
+    def test_arxiv_search_fills_preprint_metadata_after_crossref_miss(self) -> None:
+        class MissingCrossrefClient:
+            def search(self, *, title: str, authors):
+                return None
+
+        class FoundArxivClient:
+            def search(self, *, title: str, authors):
+                return {
+                    "doi": "unknown",
+                    "title": title,
+                    "authors": authors,
+                    "journal": "arXiv-preprint",
+                    "year": "2026",
+                    "arxiv_url": "https://arxiv.org/abs/2609.09425",
+                }
+
+        class ArxivExtractor(LLMMetadataExtractor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+
+            def _extract_component(self, component, compact_json):
+                if component == "title":
+                    value = "Edu-QuRating"
+                elif component == "authors":
+                    value = ["Oliver Garrod"]
+                elif "doi_metadata" in compact_json:
+                    value = {
+                        "name": "arXiv-preprint",
+                        "year": "2026",
+                        "doi": "unknown",
+                    }
+                else:
+                    value = {"name": None, "year": None, "doi": "unknown"}
+                return MetadataDecision(
+                    value=value,
+                    confidence="high",
+                    reason="Test response",
+                    source_pages=[0, 1],
+                )
+
+        extractor = ArxivExtractor(
+            doi_metadata_client=MissingCrossrefClient(),
+            arxiv_metadata_client=FoundArxivClient(),
+            input_fn=lambda prompt: (_ for _ in ()).throw(
+                AssertionError("Manual metadata input should not be requested")
+            ),
+        )
+
+        result = extractor.extract_metadata(marker_document())
+
+        self.assertEqual(
+            result.journal.value["arxiv_url"],
+            "https://arxiv.org/abs/2609.09425",
+        )
+        self.assertEqual(result.journal.value["name"], "arXiv-preprint")
+        self.assertEqual(result.journal.value["doi"], "unknown")
+
     def test_marker_html_rejects_doi_from_navigation_link(self) -> None:
         document = {
             "children": [
@@ -212,17 +317,12 @@ class TestMetadataFlow(unittest.TestCase):
         self.assertEqual(decision.value["issn"], "1234-5678")
         self.assertEqual(extractor.calls, [[0, 1], [0, 1, 2, 3]])
 
-    def test_remaining_missing_values_use_manual_input(self) -> None:
-        answers = iter(
-            [
-                "unknown",
-                "Manual Journal",
-                "7",
-                "1",
-                "2024",
-            ]
+    def test_missing_doi_and_journal_are_marked_unknown_without_manual_input(self) -> None:
+        extractor = AlwaysMissingExtractor(
+            input_fn=lambda prompt: (_ for _ in ()).throw(
+                AssertionError("Manual metadata input should not be requested")
+            )
         )
-        extractor = AlwaysMissingExtractor(input_fn=lambda prompt: next(answers))
 
         decision = extractor.extract_component(
             marker_document(),
@@ -230,9 +330,10 @@ class TestMetadataFlow(unittest.TestCase):
             allow_manual=True,
         )
 
-        self.assertEqual(decision.confidence, "high")
+        self.assertEqual(decision.confidence, "low")
         self.assertEqual(decision.value["doi"], "unknown")
-        self.assertEqual(decision.value["name"], "Manual Journal")
+        self.assertEqual(decision.value["name"], "unknown")
+        self.assertEqual(decision.value["year"], "unknown")
         self.assertIsNone(decision.value.get("issn"))
 
     def test_optional_journal_fields_do_not_require_manual_input(self) -> None:
@@ -260,7 +361,7 @@ class TestMetadataFlow(unittest.TestCase):
 
         self.assertEqual(decision.value, {"name": "Example Journal", "year": "2025"})
 
-    def test_supplied_manual_doi_is_looked_up_before_remaining_manual_fields(self) -> None:
+    def test_missing_doi_does_not_prompt_for_manual_doi(self) -> None:
         class FakeDoiClient:
             def __init__(self) -> None:
                 self.dois: list[str] = []
@@ -270,18 +371,10 @@ class TestMetadataFlow(unittest.TestCase):
                 return {"doi": doi, "journal": "Lookup Journal"}
 
         doi_client = FakeDoiClient()
-        answers = iter(
-            [
-                "10.1234/manual",
-                "y",
-                "Manual Journal",
-                "7",
-                "1",
-                "2024",
-            ]
-        )
         extractor = AlwaysMissingExtractor(
-            input_fn=lambda prompt: next(answers),
+            input_fn=lambda prompt: (_ for _ in ()).throw(
+                AssertionError("Manual DOI input should not be requested")
+            ),
             doi_metadata_client=doi_client,
         )
 
@@ -291,10 +384,10 @@ class TestMetadataFlow(unittest.TestCase):
             allow_manual=True,
         )
 
-        self.assertEqual(doi_client.dois, ["10.1234/manual"])
-        self.assertEqual(decision.value["doi"], "10.1234/manual")
+        self.assertEqual(doi_client.dois, [])
+        self.assertEqual(decision.value["doi"], "unknown")
 
-    def test_user_rejection_of_unverifiable_crossref_data_triggers_manual_fields(self) -> None:
+    def test_unverifiable_crossref_data_does_not_trigger_manual_fields(self) -> None:
         class FakeDoiClient:
             def __init__(self) -> None:
                 self.lookups = 0
@@ -304,16 +397,10 @@ class TestMetadataFlow(unittest.TestCase):
                 return {"doi": doi, "journal": "Unconfirmed Journal", "year": "2025"}
 
         doi_client = FakeDoiClient()
-        answers = iter(
-            [
-                "10.1234/manual",
-                "n",
-                "Manual Journal",
-                "2024",
-            ]
-        )
         extractor = AlwaysMissingExtractor(
-            input_fn=lambda prompt: next(answers),
+            input_fn=lambda prompt: (_ for _ in ()).throw(
+                AssertionError("Manual metadata input should not be requested")
+            ),
             doi_metadata_client=doi_client,
         )
 
@@ -323,10 +410,9 @@ class TestMetadataFlow(unittest.TestCase):
             allow_manual=True,
         )
 
-        self.assertEqual(doi_client.lookups, 1)
+        self.assertEqual(doi_client.lookups, 0)
         self.assertEqual(decision.value["doi"], "unknown")
-        self.assertEqual(decision.value["name"], "Manual Journal")
-        self.assertEqual(decision.value["year"], "2024")
+        self.assertEqual(decision.value["name"], "unknown")
 
 
 if __name__ == "__main__":

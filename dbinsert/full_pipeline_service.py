@@ -33,6 +33,7 @@ from .metadata_checker import (
     MetadataCompletenessChecker,
     MetadataPromptContext,
 )
+from .metadata_year import apply_year_fallback
 from .models import PaperMetadataRecord
 from .pipeline_loader import load_classified_heading_splits
 from .text_quality_checker import (
@@ -180,6 +181,19 @@ class PdfToLancePipeline:
             try:
                 extracted_result = metadata_extractor.extract_metadata(document)
                 extracted_metadata = self._metadata_result_to_dict(extracted_result)
+                previous_year = (
+                    extracted_metadata.get("journal", {}).get("year")
+                    if isinstance(extracted_metadata.get("journal"), dict)
+                    else None
+                )
+                apply_year_fallback(extracted_metadata, pdf_path)
+                current_year = extracted_metadata["journal"]["year"]
+                if current_year != previous_year:
+                    self._emit_metadata_event(
+                        paper_id=paper_id,
+                        message=f"Publication year fallback set year={current_year}.",
+                        log_file=metadata_log,
+                    )
             finally:
                 metadata_extractor.close()
 
@@ -192,6 +206,7 @@ class PdfToLancePipeline:
             extracted_metadata=extracted_metadata,
             metadata_trace_log_path=metadata_trace_log_path,
         )
+        unresolved_metadata = self._unresolved_metadata_fields(extracted_metadata)
 
         # Create the raw text markdown file from the pdf text data
         # Recreate it if rerun_filtered_markdown is set to True (e.g., we are re-running the data extraction from just the json files after an earlier marker pdf extraction)
@@ -375,6 +390,10 @@ class PdfToLancePipeline:
             replace_existing=replace_existing,
         )
         self._emit_stage(f"[{paper_id}] Ingestion complete. Inserted {inserted_count} chunks.")
+        if unresolved_metadata:
+            self._emit_stage(
+                f"[{paper_id}] Metadata unresolved: {', '.join(unresolved_metadata)}."
+            )
 
         return {
             "paper_id": paper_id,
@@ -389,6 +408,7 @@ class PdfToLancePipeline:
             "metadata_trace_log_path": str(metadata_trace_log_path),
             "text_quality_path": str(text_quality_path),
             "inserted_chunks": inserted_count,
+            "unresolved_metadata": unresolved_metadata,
         }
 
     def _prompt_for_ocr(
@@ -439,6 +459,27 @@ class PdfToLancePipeline:
             metadata_trace_log_path=metadata_trace_log_path,
             stage="before manual completion",
         )
+
+        journal = extracted_metadata.get("journal")
+        journal_name = journal.get("name") if isinstance(journal, dict) else None
+        if isinstance(journal_name, str) and journal_name.strip().lower() == "unknown":
+            self._emit_stage(
+                f"[{paper_id}] DOI/journal metadata unresolved; continuing without manual input."
+            )
+            self._record_metadata_issues(
+                paper_id=paper_id,
+                issues=issues,
+                metadata_trace_log_path=metadata_trace_log_path,
+                stage="automatic Crossref/arXiv resolution failed",
+            )
+            non_journal_issues = [
+                issue
+                for issue in issues
+                if issue.field_name not in {"journal.name", "year"}
+            ]
+            if not non_journal_issues:
+                return extracted_metadata
+            issues = non_journal_issues
 
         self._emit_stage(
             f"[{paper_id}] Missing required metadata detected. Prompting for manual entry."
@@ -491,7 +532,25 @@ class PdfToLancePipeline:
             "authors": list(result.authors.value or []),
             "keywords": list(result.keywords.value or []),
             "references": list(result.references),
+            "arxiv_url": (
+                result.journal.value.get("arxiv_url")
+                if isinstance(result.journal.value, dict)
+                else None
+            ),
         }
+
+    def _unresolved_metadata_fields(self, metadata: dict[str, Any]) -> list[str]:
+        journal = metadata.get("journal")
+        if not isinstance(journal, dict):
+            return ["doi", "journal"]
+        unresolved: list[str] = []
+        if str(journal.get("doi", "")).strip().lower() == "unknown":
+            unresolved.append("doi")
+        if str(journal.get("name", "")).strip().lower() == "unknown":
+            unresolved.append("journal")
+        if str(journal.get("year", "")).strip().lower() == "unknown":
+            unresolved.append("year")
+        return unresolved
 
     def _emit_metadata_event(self, *, paper_id: str, message: str, log_file: Any) -> None:
         log_file.write(f"[{paper_id}] {message}\n")
@@ -720,6 +779,7 @@ class PdfToLancePipeline:
             issue=journal_payload.get("issue") if isinstance(journal_payload, dict) else None,
             year=year,
             doi=journal_payload.get("doi") if isinstance(journal_payload, dict) else None,
+            arxiv_url=journal_payload.get("arxiv_url") if isinstance(journal_payload, dict) else None,
             issn=journal_payload.get("issn") if isinstance(journal_payload, dict) else None,
             references=references,
             keywords=keywords,

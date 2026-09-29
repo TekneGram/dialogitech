@@ -18,6 +18,7 @@ class PaperMetadataRecord:
     issue: str | None = None
     year: int | None = None
     doi: str | None = None
+    arxiv_url: str | None = None
     issn: str | None = None
     references: list[str] | None = None
     keywords: list[str] | None = None
@@ -43,6 +44,7 @@ class ChunkRecord:
     issue: str | None
     year: int | None
     doi: str | None
+    arxiv_url: str | None
     issn: str | None
     references: list[str]
     keywords: list[str]
@@ -82,6 +84,7 @@ class EmbeddedChunkRecord:
     issue: str | None
     year: int | None
     doi: str | None
+    arxiv_url: str | None
     issn: str | None
     references: list[str]
     keywords: list[str]

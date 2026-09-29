@@ -190,6 +190,7 @@ def main() -> None:
                 "paper_id": str(result["paper_id"]),
                 "pdf_path": str(pdf_path),
                 "inserted_chunks": int(result["inserted_chunks"]),
+                "unresolved_metadata": ",".join(result.get("unresolved_metadata", [])),
             }
         )
         print(
@@ -197,6 +198,12 @@ def main() -> None:
             f"(paper_id={result['paper_id']}, inserted_chunks={result['inserted_chunks']})",
             flush=True,
         )
+        if result.get("unresolved_metadata"):
+            print(
+                f"[{index}/{total_pdfs}] Unresolved metadata for {pdf_path}: "
+                f"{', '.join(result['unresolved_metadata'])}",
+                flush=True,
+            )
 
     if index_manager is not None and successes:
         print("Building LanceDB indexes once after batch ingestion.", flush=True)
@@ -212,7 +219,8 @@ def main() -> None:
         print(
             f"SUCCESS paper_id={success['paper_id']} "
             f"inserted_chunks={success['inserted_chunks']} "
-            f"pdf_path={success['pdf_path']}",
+            f"pdf_path={success['pdf_path']} "
+            f"unresolved_metadata={success['unresolved_metadata'] or 'none'}",
             flush=True,
         )
 

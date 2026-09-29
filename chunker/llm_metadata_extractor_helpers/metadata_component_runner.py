@@ -43,7 +43,9 @@ class MetadataComponentRunner:
     ]
     evidence_sources = ["gemma"]
     if "doi_metadata" in compact_json:
-      evidence_sources.append("crossref")
+      evidence_sources.append(
+          "arxiv" if compact_json["doi_metadata"].get("arxiv_url") else "crossref"
+      )
 
     if component == "journal" and isinstance(decision.value, dict):
       provenance = {

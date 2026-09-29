@@ -16,6 +16,7 @@ from chunker.llm_rhetorical_move_classifier_helpers.rhetorical_move_models impor
 )
 
 from .models import PaperMetadataRecord
+from .metadata_year import apply_year_fallback
 
 
 def load_classified_heading_splits(path: str | Path) -> tuple[list[ClassifiedHeadingSplit], str | None]:
@@ -103,6 +104,7 @@ def build_paper_metadata(
     issue: str | None = None
     year: int | None = None
     doi: str | None = None
+    arxiv_url: str | None = None
     issn: str | None = None
     references: list[str] = []
     keywords: list[str] = []
@@ -120,6 +122,7 @@ def build_paper_metadata(
             )
         finally:
             metadata_extractor.close()
+        apply_year_fallback(metadata, pdf_path or marker_json_path)
         title = metadata.get("title")
         authors = list(metadata.get("authors") or [])
 
@@ -129,6 +132,7 @@ def build_paper_metadata(
             volume = journal_payload.get("volume")
             issue = journal_payload.get("issue")
             doi = journal_payload.get("doi")
+            arxiv_url = journal_payload.get("arxiv_url")
             issn = journal_payload.get("issn")
             raw_year = journal_payload.get("year")
             if isinstance(raw_year, str) and raw_year.isdigit():
@@ -149,6 +153,7 @@ def build_paper_metadata(
         issue=issue,
         year=year,
         doi=doi,
+        arxiv_url=arxiv_url,
         issn=issn,
         references=references,
         keywords=keywords,

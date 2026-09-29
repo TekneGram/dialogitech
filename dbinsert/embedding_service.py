@@ -40,6 +40,7 @@ class EmbeddingService(ABC):
                     issue=chunk.issue,
                     year=chunk.year,
                     doi=chunk.doi,
+                    arxiv_url=chunk.arxiv_url,
                     issn=chunk.issn,
                     references=list(chunk.references),
                     keywords=list(chunk.keywords),

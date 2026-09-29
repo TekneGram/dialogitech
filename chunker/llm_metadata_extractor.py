@@ -8,6 +8,7 @@ from chunker.llm_metadata_extractor_helpers.metadata_models import MetadataExtra
 from chunker.llm_worker import LLMWorker
 from chunker.llm_metadata_extractor_helpers.metadata_component_runner import MetadataComponentRunner
 from chunker.llm_metadata_extractor_helpers.doi_metadata_client import DoiMetadataClient
+from chunker.llm_metadata_extractor_helpers.arxiv_metadata_client import ArxivMetadataClient
 from chunker.llm_metadata_extractor_helpers.metadata_evidence import MetadataEvidence
 from chunker.llm_metadata_extractor_helpers.metadata_flow import MetadataExtractionFlow
 from chunker.llm_metadata_extractor_helpers.missing_values_handler import MetaDataMissingValuesHandler
@@ -48,6 +49,7 @@ class LLMMetadataExtractor:
       event_logger: Callable[[str], None] | None = None,
       input_fn: Callable[[str], str] | None = None,
       doi_metadata_client: DoiMetadataClient | None = None,
+      arxiv_metadata_client: ArxivMetadataClient | None = None,
   ) -> None:
     if request_timeout_seconds <= 0:
       raise ValueError("request_timeout_seconds must be a positive number.")
@@ -61,6 +63,7 @@ class LLMMetadataExtractor:
     self.metadata_handler = MetaDataMissingValuesHandler(input_fn or input)
     self.response_validator = MetadataResponseValidator()
     self.doi_metadata_client = doi_metadata_client or DoiMetadataClient()
+    self.arxiv_metadata_client = arxiv_metadata_client or ArxivMetadataClient()
     self.evidence = MetadataEvidence()
     self.reference_extractor = DeterministicReferenceExtractor()
     self.component_runner = MetadataComponentRunner(
@@ -77,6 +80,7 @@ class LLMMetadataExtractor:
         component_extractor=self._extract_component,
         missing_values_handler=self.metadata_handler,
         doi_metadata_client=self.doi_metadata_client,
+        arxiv_metadata_client=self.arxiv_metadata_client,
         event_logger=self._log_event,
     )
 

@@ -61,7 +61,10 @@ class MetadataCompletenessChecker:
             )
 
         year = journal.get("year") if isinstance(journal, dict) else None
-        if not isinstance(year, str) or not year.strip().isdigit():
+        if (
+            not isinstance(year, str)
+            or (not year.strip().isdigit() and year.strip().lower() != "unknown")
+        ):
             issues.append(MetadataValidationIssue(field_name="year", prompt_label="Publication year"))
 
         return issues

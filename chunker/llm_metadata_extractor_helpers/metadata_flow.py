@@ -5,13 +5,14 @@ from typing import Any, Callable
 
 from .doi_candidate_extractor import DoiCandidateExtractor
 from .doi_metadata_client import DoiMetadataClient, DoiMetadataError
+from .arxiv_metadata_client import ArxivMetadataClient, ArxivMetadataError
 from .metadata_evidence import MetadataEvidence
 from .metadata_models import MetadataDecision
 from .missing_values_handler import MetaDataMissingValuesHandler
 
 
 class MetadataExtractionFlow:
-  """Coordinate bounded page expansion and manual metadata fallback."""
+  """Coordinate evidence expansion and DOI/arXiv metadata lookup."""
 
   def __init__(
       self,
@@ -20,6 +21,7 @@ class MetadataExtractionFlow:
       component_extractor: Callable[[str, dict[str, Any]], MetadataDecision],
       missing_values_handler: MetaDataMissingValuesHandler,
       doi_metadata_client: DoiMetadataClient | None = None,
+      arxiv_metadata_client: ArxivMetadataClient | None = None,
       doi_candidate_extractor: DoiCandidateExtractor | None = None,
       event_logger: Callable[[str], None] | None = None,
   ) -> None:
@@ -27,6 +29,7 @@ class MetadataExtractionFlow:
     self.component_extractor = component_extractor
     self.missing_values_handler = missing_values_handler
     self.doi_metadata_client = doi_metadata_client
+    self.arxiv_metadata_client = arxiv_metadata_client
     self.doi_candidate_extractor = doi_candidate_extractor or DoiCandidateExtractor()
     self.event_logger = event_logger or (lambda message: None)
     self._doi_confirmation_rejected = False
@@ -60,13 +63,7 @@ class MetadataExtractionFlow:
     if doi_metadata:
       doi_json = dict(initial_json)
       doi_json["doi_metadata"] = doi_metadata
-      for component in unresolved:
-        doi_decision = self.component_extractor(component, doi_json)
-        decisions[component] = self.missing_values_handler.merge(
-            decisions[component],
-            doi_decision,
-            component,
-        )
+      self._apply_external_metadata(decisions, unresolved, doi_json, doi_metadata)
 
       unresolved = [
           component
@@ -80,18 +77,13 @@ class MetadataExtractionFlow:
         expanded_json = self.evidence.compact_pages(initial_pages + additional_pages)
         if doi_metadata:
           expanded_json["doi_metadata"] = doi_metadata
-        for component in unresolved:
-          additional_decision = self.component_extractor(component, expanded_json)
-          if component == "journal":
-            additional_decision = self._validated_journal_decision(
-                additional_decision,
-                expanded_json,
-            )
-          decisions[component] = self.missing_values_handler.merge(
-              decisions[component],
-              additional_decision,
-              component,
-          )
+        self._apply_external_metadata(
+            decisions,
+            unresolved,
+            expanded_json,
+            doi_metadata,
+            validate_journal=True,
+        )
 
         unresolved = [
             component
@@ -107,13 +99,12 @@ class MetadataExtractionFlow:
           if expanded_doi_metadata:
             expanded_doi_json = dict(expanded_json)
             expanded_doi_json["doi_metadata"] = expanded_doi_metadata
-            for component in unresolved:
-              doi_decision = self.component_extractor(component, expanded_doi_json)
-              decisions[component] = self.missing_values_handler.merge(
-                  decisions[component],
-                  doi_decision,
-                  component,
-              )
+            self._apply_external_metadata(
+                decisions,
+                unresolved,
+                expanded_doi_json,
+                expanded_doi_metadata,
+            )
 
             unresolved = [
                 component
@@ -121,29 +112,17 @@ class MetadataExtractionFlow:
                 if self.missing_values_handler.needs_more_evidence(decision, component)
             ]
 
-    if unresolved and allow_manual and "journal" in decisions:
-      if not self._has_usable_doi(decisions["journal"]):
-        manual_doi = self.missing_values_handler.prompt_for_doi()
-        decisions["journal"] = self._with_doi(decisions["journal"], manual_doi)
-
-        if manual_doi != "unknown":
-          doi_metadata = self._lookup_doi_metadata(decisions, unresolved)
-          if doi_metadata:
-            doi_json = dict(initial_json)
-            doi_json["doi_metadata"] = doi_metadata
-            for component in unresolved:
-              doi_decision = self.component_extractor(component, doi_json)
-              decisions[component] = self.missing_values_handler.merge(
-                  decisions[component],
-                  doi_decision,
-                  component,
-              )
-
-            unresolved = [
-                component
-                for component, decision in decisions.items()
-                if self.missing_values_handler.needs_more_evidence(decision, component)
-            ]
+    if unresolved and "journal" in decisions:
+      decisions["journal"] = self._mark_missing_metadata_unknown(decisions["journal"])
+      self.event_logger(
+          "Crossref and arXiv did not provide a reliable match; "
+          "set doi=unknown and journal=unknown."
+      )
+      unresolved = [
+          component
+          for component, decision in decisions.items()
+          if self.missing_values_handler.needs_more_evidence(decision, component)
+      ]
 
     for component, decision in list(decisions.items()):
       if not self.missing_values_handler.needs_more_evidence(decision, component):
@@ -154,14 +133,8 @@ class MetadataExtractionFlow:
           f"Metadata component {component!r} is missing values after pages 0–3: "
           f"{', '.join(missing)}"
       )
-      if not allow_manual:
-        raise RuntimeError(message)
-
       self.event_logger(message)
-      decisions[component] = self.missing_values_handler.prompt_for_manual_entry(
-          decision,
-          component,
-      )
+      decisions[component] = self._mark_component_unknown(decision, component)
 
     return decisions
 
@@ -170,20 +143,54 @@ class MetadataExtractionFlow:
       decisions: dict[str, MetadataDecision],
       unresolved: list[str],
   ) -> dict[str, Any] | None:
-    if self.doi_metadata_client is None or not unresolved or self._doi_confirmation_rejected:
+    if self.doi_metadata_client is None or not unresolved:
       return None
 
     journal = decisions.get("journal")
     journal_value = journal.value if journal is not None else None
     doi = journal_value.get("doi") if isinstance(journal_value, dict) else None
     if not isinstance(doi, str) or not doi.strip() or doi.strip().lower() == "unknown":
+      title_decision = decisions.get("title")
+      authors_decision = decisions.get("authors")
+      title = title_decision.value if title_decision is not None else None
+      authors = authors_decision.value if authors_decision is not None else None
+      search = getattr(self.doi_metadata_client, "search", None)
+      if not callable(search) or not isinstance(title, str) or not title.strip():
+        return None
+      try:
+        metadata = search(title=title, authors=authors)
+      except (DoiMetadataError, ValueError) as exc:
+        self.event_logger(f"Crossref DOI search failed: {exc}")
+        metadata = None
+      if metadata is not None:
+        self.event_logger(
+            f"Crossref DOI search found a reliable match: {metadata.get('doi')}"
+        )
+        return metadata
+
+      if self.arxiv_metadata_client is not None:
+        try:
+          arxiv_metadata = self.arxiv_metadata_client.search(
+              title=title,
+              authors=authors,
+          )
+        except (ArxivMetadataError, ValueError) as exc:
+          self.event_logger(f"arXiv search failed: {exc}")
+          arxiv_metadata = None
+        if arxiv_metadata is not None:
+          self.event_logger(
+              f"arXiv search found a reliable match: {arxiv_metadata.get('arxiv_url')}"
+          )
+          return arxiv_metadata
+
+      self.event_logger("Crossref and arXiv searches found no reliable match.")
       return None
 
     try:
       metadata = self.doi_metadata_client.lookup(doi)
     except (DoiMetadataError, ValueError) as exc:
       self.event_logger(f"DOI metadata lookup failed for {doi}: {exc}")
-      return None
+      return self._search_arxiv(decisions)
 
     if not self._has_comparison_evidence(decisions):
       if not self.missing_values_handler.confirm_crossref_metadata(metadata):
@@ -192,17 +199,132 @@ class MetadataExtractionFlow:
             f"Rejected DOI metadata for {doi}: user confirmation was declined."
         )
         decisions["journal"] = self._mark_doi_unresolved(journal)
-        return None
+        return self._search_arxiv(decisions)
 
     if not self._doi_matches_paper(metadata, decisions):
       self.event_logger(
           f"Rejected DOI metadata for {doi}: title/author validation failed."
       )
       decisions["journal"] = self._mark_doi_unresolved(journal)
-      return None
+      return self._search_arxiv(decisions)
 
     self.event_logger(f"Loaded DOI metadata for {doi}.")
     return metadata
+
+  def _search_arxiv(
+      self,
+      decisions: dict[str, MetadataDecision],
+  ) -> dict[str, Any] | None:
+    if self.arxiv_metadata_client is None:
+      return None
+    title_decision = decisions.get("title")
+    authors_decision = decisions.get("authors")
+    title = title_decision.value if title_decision is not None else None
+    authors = authors_decision.value if authors_decision is not None else None
+    if not isinstance(title, str) or not title.strip():
+      return None
+    try:
+      metadata = self.arxiv_metadata_client.search(title=title, authors=authors)
+    except (ArxivMetadataError, ValueError) as exc:
+      self.event_logger(f"arXiv search failed: {exc}")
+      return None
+    if metadata is None:
+      self.event_logger("arXiv search found no reliable match.")
+      return None
+    self.event_logger(
+        f"arXiv search found a reliable match: {metadata.get('arxiv_url')}"
+    )
+    return metadata
+
+  def _apply_external_metadata(
+      self,
+      decisions: dict[str, MetadataDecision],
+      components: list[str],
+      compact_json: dict[str, Any],
+      metadata: dict[str, Any] | None,
+      *,
+      validate_journal: bool = False,
+  ) -> None:
+    for component in components:
+      decision = self.component_extractor(component, compact_json)
+      if validate_journal and component == "journal":
+        decision = self._validated_journal_decision(decision, compact_json)
+      decisions[component] = self.missing_values_handler.merge(
+          decisions[component],
+          decision,
+          component,
+      )
+
+    if metadata and metadata.get("arxiv_url") and "journal" in decisions:
+      decisions["journal"] = self._apply_arxiv_metadata(
+          decisions["journal"],
+          metadata,
+      )
+
+  def _apply_arxiv_metadata(
+      self,
+      decision: MetadataDecision,
+      metadata: dict[str, Any],
+  ) -> MetadataDecision:
+    value = dict(decision.value) if isinstance(decision.value, dict) else {}
+    value["name"] = "arXiv-preprint"
+    value["doi"] = metadata.get("doi") or "unknown"
+    value["arxiv_url"] = metadata["arxiv_url"]
+    if value.get("year") is None and metadata.get("year") is not None:
+      value["year"] = metadata["year"]
+    return replace(
+        decision,
+        value=value,
+        reason="Metadata matched to an arXiv preprint.",
+        provenance={
+            **decision.provenance,
+            "name": sorted(set(decision.provenance.get("name", []) + ["arxiv"])),
+            "doi": sorted(set(decision.provenance.get("doi", []) + ["arxiv"])),
+            "arxiv_url": ["arxiv"],
+        },
+    )
+
+  def _mark_missing_metadata_unknown(self, decision: MetadataDecision) -> MetadataDecision:
+    value = dict(decision.value) if isinstance(decision.value, dict) else {}
+    if not isinstance(value.get("name"), str) or not value["name"].strip():
+      value["name"] = "unknown"
+    value["year"] = value.get("year") or "unknown"
+    value["doi"] = "unknown"
+    value.setdefault("arxiv_url", None)
+    return replace(
+        decision,
+        value=value,
+        confidence="low",
+        reason="Crossref and arXiv searches found no reliable match.",
+        provenance={
+            **decision.provenance,
+            "name": ["unresolved"],
+            "year": sorted(set(decision.provenance.get("year", []) + ["unresolved"])),
+            "doi": ["unresolved"],
+            "arxiv_url": ["unresolved"],
+        },
+    )
+
+  def _mark_component_unknown(
+      self,
+      decision: MetadataDecision,
+      component: str,
+  ) -> MetadataDecision:
+    if component == "title":
+      value: Any = "unknown"
+    elif component == "authors":
+      value = ["unknown"]
+    elif component == "journal":
+      return self._mark_missing_metadata_unknown(decision)
+    else:
+      value = "unknown"
+    return replace(
+        decision,
+        value=value,
+        confidence="low",
+        reason=f"No metadata found for {component}; set to unknown.",
+        provenance={**decision.provenance, "value": ["unresolved"]},
+    )
 
   def _has_usable_doi(self, decision: MetadataDecision) -> bool:
     value = decision.value

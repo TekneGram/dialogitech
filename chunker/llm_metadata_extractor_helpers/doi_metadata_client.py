@@ -17,6 +17,7 @@ class DoiMetadataError(RuntimeError):
 
 class DoiMetadataClient:
   CROSSREF_BASE_URL = "https://api.crossref.org/v1/works/"
+  CROSSREF_SEARCH_URL = "https://api.crossref.org/v1/works"
   DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
 
   def __init__(
@@ -95,6 +96,39 @@ class DoiMetadataClient:
     )
     return normalized
 
+  def search(
+      self,
+      *,
+      title: str,
+      authors: Any = None,
+  ) -> dict[str, Any] | None:
+    """Find a reliable DOI by searching Crossref metadata.
+
+    The first query includes the extracted authors. If that does not produce a
+    strong title-and-author match, a title-only query is attempted. Results are
+    normalized and cached in the same form as ``lookup`` results.
+    """
+    if not isinstance(title, str) or not title.strip():
+      return None
+
+    author_names = self._author_search_text(authors)
+    if author_names:
+      metadata = self._search_once(
+          query=" ".join((title.strip(), author_names)),
+          title=title,
+          authors=authors,
+          require_author_match=True,
+      )
+      if metadata is not None:
+        return metadata
+
+    return self._search_once(
+        query=title.strip(),
+        title=title,
+        authors=None,
+        require_author_match=False,
+    )
+
   def matches_paper(
       self,
       metadata: dict[str, Any],
@@ -128,6 +162,92 @@ class DoiMetadataClient:
       return 0.0
     return SequenceMatcher(None, left_normalized, right_normalized).ratio()
 
+  def _search_once(
+      self,
+      *,
+      query: str,
+      title: str,
+      authors: Any,
+      require_author_match: bool,
+  ) -> dict[str, Any] | None:
+    params = urllib.parse.urlencode({
+        "query.bibliographic": query,
+        "rows": "5",
+    })
+    url = f"{self.CROSSREF_SEARCH_URL}?{params}"
+    if self.mailto:
+      url = f"{url}&mailto={urllib.parse.quote(self.mailto)}"
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "DialogiTech DOI metadata client",
+        },
+    )
+
+    try:
+      with self._urlopen(request, timeout=self.timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
+      raise DoiMetadataError(f"Crossref search failed for {query!r}: {exc}") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+      raise DoiMetadataError("Crossref search returned invalid JSON.") from exc
+
+    message = payload.get("message")
+    items = message.get("items") if isinstance(message, dict) else None
+    if not isinstance(items, list):
+      return None
+
+    ranked: list[tuple[float, dict[str, Any]]] = []
+    extracted_surnames = self._author_surnames(authors)
+    for item in items:
+      if not isinstance(item, dict):
+        continue
+      raw_doi = item.get("DOI") or item.get("doi")
+      if not isinstance(raw_doi, str):
+        continue
+      try:
+        doi = self.normalize_doi(raw_doi)
+        metadata = self._normalize_record(doi, {"message": item})
+      except (KeyError, TypeError, ValueError):
+        continue
+
+      crossref_title = metadata.get("title")
+      if not isinstance(crossref_title, str):
+        continue
+      title_score = self._title_similarity(title, crossref_title)
+      candidate_surnames = self._author_surnames(metadata.get("authors"))
+      author_overlap = extracted_surnames.intersection(candidate_surnames)
+
+      if require_author_match:
+        if title_score < 0.85 or not author_overlap:
+          continue
+        score = title_score + min(0.15, 0.05 * len(author_overlap))
+      else:
+        if title_score < 0.92:
+          continue
+        score = title_score
+
+      ranked.append((score, metadata))
+
+    if not ranked:
+      return None
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    metadata = ranked[0][1]
+    self._write_cache(metadata)
+    return metadata
+
+  def _author_search_text(self, authors: Any) -> str:
+    if not isinstance(authors, list):
+      return ""
+    return " ".join(
+        author.strip()
+        for author in authors
+        if isinstance(author, str) and author.strip()
+    )
+
   def _author_surnames(self, authors: Any) -> set[str]:
     if not isinstance(authors, list):
       authors = [authors]
@@ -146,6 +266,17 @@ class DoiMetadataClient:
   def _cache_path(self, doi: str) -> Path:
     key = hashlib.sha256(doi.lower().encode("utf-8")).hexdigest()
     return self.cache_dir / f"{key}.json"
+
+  def _write_cache(self, metadata: dict[str, Any]) -> None:
+    doi = metadata.get("doi")
+    if not isinstance(doi, str) or not doi.strip():
+      return
+    cache_path = self._cache_path(doi)
+    self.cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
   def _read_cache(self, path: Path) -> dict[str, Any] | None:
     if not path.is_file():

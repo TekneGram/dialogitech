@@ -152,6 +152,8 @@ def main() -> None:
     print(f"marker_log_path={result['marker_log_path']}")
     print(f"classification_log_path={result['classification_log_path']}")
     print(f"inserted_chunks={result['inserted_chunks']}")
+    if result.get("unresolved_metadata"):
+        print(f"unresolved_metadata={','.join(result['unresolved_metadata'])}")
 
 
 if __name__ == "__main__":
