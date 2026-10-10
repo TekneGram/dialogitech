@@ -24,6 +24,11 @@ class TestMetadataYearFallback(unittest.TestCase):
 
         self.assertEqual(apply_year_fallback(metadata, "2025 Prompt Taxonomy.pdf"), "2024")
 
+    def test_replaces_nonnumeric_extracted_year(self) -> None:
+        metadata = {"journal": {"name": "Example Journal", "year": "not available"}}
+
+        self.assertEqual(apply_year_fallback(metadata, "2025 Prompt Taxonomy.pdf"), "2025")
+
     def test_unknown_year_is_not_a_missing_prompt_field(self) -> None:
         issues = MetadataCompletenessChecker().find_missing_fields({
             "title": "Example",

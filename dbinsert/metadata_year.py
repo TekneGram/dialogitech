@@ -20,8 +20,12 @@ def apply_year_fallback(metadata: dict, source_path: str | Path | None) -> str:
         metadata["journal"] = journal
 
     current_year = journal.get("year")
-    if isinstance(current_year, str) and current_year.strip() and current_year.strip().lower() != "unknown":
-        return current_year.strip()
+    if isinstance(current_year, int) and 1000 <= current_year <= 9999:
+        journal["year"] = str(current_year)
+        return journal["year"]
+    if isinstance(current_year, str) and re.fullmatch(r"\d{4}", current_year.strip()):
+        journal["year"] = current_year.strip()
+        return journal["year"]
 
     inferred_year = infer_year_from_filename(source_path)
     journal["year"] = inferred_year or "unknown"
