@@ -36,3 +36,7 @@ search_results/
 Papers/
 pdfs_old/
 pdfs_processed/
+
+# AP Calculus Experiments
+apcalc/
+mathconverttest.py

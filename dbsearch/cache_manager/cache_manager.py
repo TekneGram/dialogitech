@@ -58,7 +58,7 @@ class CacheManager:
     data_file: str,
     search_results: list[str],
   ) -> tuple[int, str]:
-    """Append chunk IDs to an existing conversation and return its identifiers."""
+    """Append chunk IDs to an existing conversation and return its conversation number and the name of the file where the data is stored."""
     if not self.search_results_csv.exists():
       raise FileNotFoundError(f"Search results CSV does not exist: {self.search_results_csv}")
 

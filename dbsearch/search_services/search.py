@@ -57,7 +57,17 @@ class SearchLanceDB:
 
     return query.limit(limit).to_list()
 
-  def search_by_section(self, text_to_search: str, sections: SectionLabel | Collection[SectionLabel], limit: int = 10) -> list[dict]:
+
+  ### SEARCH BY SECTION ###
+
+  def search_by_section(
+      self, 
+      text_to_search: str, 
+      sections: SectionLabel | Collection[SectionLabel], 
+      limit: int = 10,
+      excluded_chunk_ids: list[str] | None = None
+    ) -> list[dict]:
+
     if limit <= 0:
       raise ValueError("Limit must be positive")
 
@@ -87,10 +97,23 @@ class SearchLanceDB:
         f"classification_label IN ({', '.join(escaped_sections)})"
       )
 
+    filters = [section_filter]
+
+    if excluded_chunk_ids:
+      escaped_ids = [
+        "'" + chunk_id.replace("'", "''") + "'"
+        for chunk_id in excluded_chunk_ids
+      ]
+      filters.append(
+        f"chunk_id NOT IN ({', '.join(escaped_ids)})"
+      )
+
+    combined_filter = " AND ".join(filters)
+
     return (
       table.search(
         query_vector,
         query_type="vector",
         vector_column_name="embedding"
-      ).where(section_filter, prefilter=True).limit(limit).to_list()
+      ).where(combined_filter, prefilter=True).limit(limit).to_list()
     )

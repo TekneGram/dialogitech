@@ -56,6 +56,7 @@ class QuestionSearch:
     print("-------------------------------------------------------------------------")
 
 
+    ### LLM WORKER EVALUATES EACH RESULT ###
     # Start the llm worker and prepare to analyze the search results.
     self.llm_worker = LLMWorker(
       python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
