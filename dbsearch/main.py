@@ -4,6 +4,7 @@ from .question_search import QuestionSearch
 from .question_search_by_section import QuestionSearchBySection
 from .review_writer import ReviewWriter
 from .summarize_question_search import SummarizeQuestionSearch
+from .paper_summary import SummarizePaper
 
 # Make a straightforward search
 def question_search(
@@ -37,16 +38,20 @@ def question_search_by_section(
     conversation_number=conversation_number
   )
 
+# Write a summary of a search based on a specific conversation number.
 def summarize_question_search(
     conversation_number: int
 ) -> None:
   search = SummarizeQuestionSearch()
   search.create_per_paper_summary(conversation_number)
 
+# Write a review based on a number of summaries across multiple conversations.
 def write_review(conversation_numbers: list[int]) -> None:
   ReviewWriter().write_review(conversation_numbers)
 
-
+# Summarize a specific paper.
+def summarize_a_paper(paper_title: str) -> None:
+  SummarizePaper().summarize_paper(paper_title)
 
 
 def main() -> None:
@@ -72,6 +77,11 @@ def main() -> None:
   write_review_parser = subparsers.add_parser(
     "write_review",
     help="Write a literature review from cached conversation summaries.",
+  )
+
+  summarize_a_paper_parser = subparsers.add_parser(
+    "summarize_a_paper",
+    help="Read each section of a paper and summarize each section; return the path to the full summary file."
   )
 
   # Create flags for question_search
@@ -168,6 +178,13 @@ def main() -> None:
     help="Conversation numbers whose summaries should be used in the review.",
   )
 
+  # Create flags for summarize_a_paper
+  summarize_a_paper_parser.add_argument(
+    "--paper-title",
+    default=None,
+    help="Supply the title of the paper you wish to summarize."
+  )
+
   args = parser.parse_args()
   if args.command == "question_search":
     question_search(
@@ -193,6 +210,9 @@ def main() -> None:
 
   if args.command == "write_review":
     write_review(conversation_numbers=args.conversation_numbers)
+
+  if args.command == "summarize_a_paper":
+    summarize_a_paper(paper_title=args.paper_title)
 
 
 if __name__ == "__main__":
