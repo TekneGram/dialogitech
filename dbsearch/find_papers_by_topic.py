@@ -1,9 +1,15 @@
 from .llm_services.llm_worker import LLMWorker
 from .search_services.search import SearchLanceDB
+from .conversation_tracker import ConversationTracker
 
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
+import csv
+import uuid
+from datetime import datetime
+
+from .utils.papers_to_md_format import papers_to_markdown_format
 
 @dataclass
 class Paper:
@@ -19,8 +25,19 @@ class Paper:
 class FindPapersByTopic:
 
   def __init__(
-      self
+      self,
+      conversation_tracker: ConversationTracker
   ) -> None:
+
+    # Set up directories and files in the class
+    self.tracking_directory = (
+          Path(__file__).resolve().parents[1] / "data" / "conversation_tracking"
+        )
+    self.find_papers_metadata: Path = self.tracking_directory / "find_papers_metadata.csv"
+    self.find_papers_directory: Path = self.tracking_directory / "find_papers"
+    self.ensure_conversation_metadata_file()
+
+    # Set up LLM and RAG
     self.llm_worker = LLMWorker(
       python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
       runner_path=Path(__file__).resolve().parents[1] / "chunker" / "mlx_llm_runner.py",
@@ -29,11 +46,52 @@ class FindPapersByTopic:
     )
     self.lancedb = SearchLanceDB()
 
+    # Use this to manage the conversation
+    self.conversation_tracker = conversation_tracker
+
     # If this class is started with a conversation number, add the papers_by_id data from the relevant data source
     self.papers_by_id: dict[str, dict[str, Any]] = {}
 
-  def find_by_topics(self, topics: list[str]) -> dict[str, dict[str, Any]]:
+  def ensure_conversation_metadata_file(self) -> None:
+    """
+    Make sure the find_papers metadata file exists
+    If it doesn't, then create it.
+    """
 
+    self.tracking_directory.mkdir(
+      parents=True,
+      exist_ok=True,
+    )
+
+    if not self.find_papers_metadata.exists():
+      fieldnames=[
+        "find_papers_id",
+        "conversation_id",
+        "created",
+        "papers_list_md_files"
+      ]
+
+      with self.find_papers_metadata.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+      ) as csv_file:
+        writer=csv.DictWriter(
+          csv_file,
+          fieldnames=fieldnames
+        )
+        writer.writeheader()
+
+  def find_by_topics(self, topics: list[str]) -> None:
+    """
+    Get a list of topics / queries by the researcher
+    Search for papers that match those topics
+    """
+    if self.conversation_tracker.get_current_conversation_id() is None:
+      conversation_id, conversation_file = self.conversation_tracker.start_new_conversation()
+      print(f"You started a new conversation. \n ID: {conversation_id} \n FILE: {conversation_file}")
+
+    
     for topic in topics:
       results = self.lancedb.basic_search(text_to_search=topic, limit=100)
 
@@ -54,10 +112,6 @@ class FindPapersByTopic:
 
         self.papers_by_id[paper_id]["count"] += 1
 
-    # Send papers_by_id to an md file and format it nicely.
-    # Save topic with a conversation number and a conversation name
-    # Save papers_by_id data to a conversation-number linked item
-
     # Sort in descending order
     self.papers_by_id = dict(
       sorted(
@@ -66,8 +120,70 @@ class FindPapersByTopic:
         reverse = True
       )
     )
-    print(self.papers_by_id)
-    return self.papers_by_id
+
+    # Manage the conversation up to now
+    if self.conversation_tracker.get_current_conversation_id() is None:
+      # If there if no conversation yet, start a new one
+      all_queries = " ".join(
+        f"query {index}: {value}"
+        for index, value in enumerate(topics)
+      )
+      title = self.conversation_tracker.create_conversation_title(context=all_queries)
+      self.conversation_tracker.start_new_conversation(title)
+      print(f"You started a new conversation. \n ID: {conversation_id} \n FILE: {conversation_file}")
+
+    # Save a new find_papers_list md file with metadata
+    find_papers_id = uuid.uuid4().hex
+    papers_list_md_file = self.find_papers_directory / f"{find_papers_id}.md"
+    papers_list_md_file.touch()
+    now = datetime.now().isoformat(timespec="seconds")
+
+    fieldnames = [
+      "find_papers_id",
+      "conversation_id",
+      "created",
+      "papers_list_md_file"
+    ]
+
+    file_is_empty = (
+      not self.find_papers_metadata.exists()
+      or self.find_papers_metadata.stat().st_size == 0
+    )
+
+    with self.find_papers_metadata.open(
+      "a",
+      newline="",
+      encoding="utf-8"
+    ) as csv_file:
+      writer = csv.DictWriter(
+        csv_file,
+        fieldnames=fieldnames
+      )
+
+      if file_is_empty:
+        writer.writeheader()
+
+      writer.writerow(
+        {
+          "find_papers_id": find_papers_id,
+          "conversation_id": self.conversation_tracker.get_current_conversation_id(),
+          "created": now,
+          "papers_list_md_file": papers_list_md_file
+        }
+      )
+
+    # Record the conversation
+    self.conversation_tracker.update_conversation(f"New LanceDB search for files by topics, with information at {papers_list_md_file}")
+    
+    # Send papers_by_id to an md file and format it nicely.
+    md_format = papers_to_markdown_format(papers_by_id=self.papers_by_id, topics=topics)
+    papers_list_md_file.write_text(md_format, encoding="utf-8")
+
+
+    
+
+    
+    print(f"Done! Check the file {papers_list_md_file} for information about each file found.")
 
   def get_an_abstract(self, paper_title: str) -> None:
     """

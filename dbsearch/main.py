@@ -6,6 +6,7 @@ from .review_writer import ReviewWriter
 from .summarize_question_search import SummarizeQuestionSearch
 from .paper_summary import SummarizePaper
 from .find_papers_by_topic import FindPapersByTopic
+from .conversation_tracker import ConversationTracker
 
 # Make a straightforward search
 def question_search(
@@ -54,11 +55,22 @@ def write_review(conversation_numbers: list[int]) -> None:
 def summarize_a_paper(paper_title: str) -> None:
   SummarizePaper().summarize_paper(paper_title)
 
-
+##################
 # List papers based on topics covered
-def find_papers_by_topics(topics: list[str]) -> None:
-  FindPapersByTopic().find_by_topics(topics)
+def find_papers_by_topics(topics: list[str], conversation_id: str | None = None) -> None:
+  conversation = ConversationTracker(conversation_id) # Create a tracker
+  FindPapersByTopic(conversation).find_by_topics(topics)
 
+def list_conversation_titles() -> None:
+  titles = ConversationTracker().get_conversation_titles()
+  for title, conversation_id in titles.items():
+    print(f"TITLE: {title} | ID: {conversation_id} \n")
+
+def see_conversation_history(conversation_id: str) -> None:
+  tracker = ConversationTracker()
+  history_path = tracker.get_conversation_history_path_by_id(conversation_id=conversation_id)
+  print(f"Your conversation history is here: {history_path}")
+###################
 
 def main() -> None:
   parser = argparse.ArgumentParser(description="DialogiTech database search commands.")
@@ -93,6 +105,16 @@ def main() -> None:
   find_papers_by_topics_parser = subparsers.add_parser(
     "find_papers_by_topics",
     help="Search for papers where a list of topics has matches and investigate those papers."
+  )
+
+  list_conversation_titles_parser = subparsers.add_parser(
+    "list_conversation_titles",
+    help="List the titles of all the conversations you have had up to now."
+  )
+
+  see_conversation_history_parser = subparsers.add_parser(
+    "see_conversation_history",
+    help="Get the file that shows the history of the conversation for a specific conversation id"
   )
 
   # Create flags for question_search
@@ -205,6 +227,13 @@ def main() -> None:
     help="a list of topics or ideas that you want searched for in papers"
   )
 
+  see_conversation_history_parser.add_argument(
+    "--conversation_id",
+    type=str,
+    required=True,
+    help="The conversation id for the conversation you wish to see the context of"
+  )
+
   args = parser.parse_args()
   if args.command == "question_search":
     question_search(
@@ -236,6 +265,12 @@ def main() -> None:
 
   if args.command == "find_papers_by_topics":
     find_papers_by_topics(topics=args.topics)
+
+  if args.command == "list_conversation_titles":
+    list_conversation_titles()
+
+  if args.command == "see_conversation_history":
+    see_conversation_history(conversation_id=args.conversation_id)
 
 
 if __name__ == "__main__":

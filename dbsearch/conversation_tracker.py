@@ -1,3 +1,4 @@
+from .llm_services.llm_worker import LLMWorker
 
 from pathlib import Path
 import csv
@@ -6,7 +7,10 @@ from datetime import datetime
 
 class ConversationTracker:
 
-  def __init__(self) -> None:
+  def __init__(
+      self,
+      conversation_id: str | None = None
+    ) -> None:
     # Set up directories and files in the class
     self.tracking_directory = (
           Path(__file__).resolve().parents[1] / "data" / "conversation_tracking"
@@ -17,8 +21,22 @@ class ConversationTracker:
 
     # Set up the conversations context
     self.conv_titles_ids: dict[str, str] = {}
-    self.current_conversation_id: str | None = None
-    self.get_conversation_titles()
+    self.current_conversation_id: str | None = conversation_id
+    self.conversation_titles = self.aggregate_conversation_titles()
+
+    # Set up LLM
+    self.llm_worker = LLMWorker(
+      python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
+      runner_path=Path(__file__).resolve().parents[1] / "chunker" / "mlx_llm_runner.py",
+      model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
+      request_timeout_seconds=120.0
+    )
+
+  def get_current_conversation_id(self) -> str | None:
+    if self.current_conversation_id is not None:
+      return self.current_conversation_id
+    else:
+      return None
 
   def ensure_conversation_metadata_file(self) -> None:
     """
@@ -50,7 +68,11 @@ class ConversationTracker:
         )
         writer.writeheader()
 
-  def get_conversation_titles(self) -> None:
+  def aggregate_conversation_titles(self) -> None:
+    """
+    Called on _init_ which means
+    to get the conversation titles we just pull them
+    """
     with self.conversation_metadata.open(
       "r",
       newline="",
@@ -62,6 +84,9 @@ class ConversationTracker:
         conversation_title = row["conversation_title"]
         conversation_id = row["conversation_id"]
         self.conv_titles_ids[conversation_title] = conversation_id
+
+  def get_conversation_titles(self) -> dict[str, str]:
+    return self.conversation_titles
 
       
   def get_conversation_history_path_by_title(self, conversation_title: str) -> Path | None:
@@ -193,3 +218,37 @@ class ConversationTracker:
       writer.writerows(rows)
 
     return self.current_conversation_id, conversation_history_path
+
+  def update_conversation(self, latest: str) -> None:
+    # Open the md file
+    # Append the latest with the current data and time
+    md_path = self.get_conversation_history_path_by_id(self.current_conversation_id)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with md_path.open("a", encoding="utf-8") as md_file:
+      md_file.write(f"\n\n[{now}]\n{latest}")
+
+  def create_conversation_title(self, context: str) -> str:
+    system_prompt = f"You create a short title for a conversation, around five to ten words. Return only the title. Do not make extra comments."
+
+    messages = [
+      {
+        "role": "system",
+        "content": system_prompt
+      }
+    ]
+
+    messages.append(
+      {
+        "role": "user",
+        "content": f"The user has made the following queries: {context}. Decide the best title based on these queries."
+      }
+    )
+
+    title = self.llm_worker.generate(
+      messages=messages,
+      max_tokens=20,
+      temperature=0.7
+    )
+
+    return title
