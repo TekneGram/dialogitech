@@ -64,7 +64,7 @@ class ConversationTracker:
         self.conv_titles_ids[conversation_title] = conversation_id
 
       
-  def get_conversation_metadata_by_title(self, conversation_title: str) -> Path | None:
+  def get_conversation_history_path_by_title(self, conversation_title: str) -> Path | None:
     with self.conversation_metadata.open(
       "r",
       newline="",
@@ -80,7 +80,7 @@ class ConversationTracker:
       f"No row found for conversation title {conversation_title}"
     )
 
-  def get_conversation_metadata_by_id(self, conversation_id: str) -> Path | None:
+  def get_conversation_history_path_by_id(self, conversation_id: str) -> Path | None:
 
     with self.conversation_metadata.open(
       "r",
@@ -155,14 +155,7 @@ class ConversationTracker:
 
   def continue_conversation(self, conversation_id) -> tuple[str, Path]:
     self.current_conversation_id = conversation_id
-
-    fieldnames = [
-      "conversation_id",
-      "started",
-      "updated",
-      "conversation_title",
-      "conversation_history_md_file"
-    ]
+    conversation_history_path = self.get_conversation_history_path_by_id(conversation_id)
 
     with self.conversation_metadata.open(
       "r",
@@ -198,4 +191,5 @@ class ConversationTracker:
       )
       writer.writeheader()
       writer.writerows(rows)
-  
+
+    return self.current_conversation_id, conversation_history_path
