@@ -152,3 +152,50 @@ class ConversationTracker:
     self.current_conversation_id = conversation_id
     
     return self.current_conversation_id, conversation_file
+
+  def continue_conversation(self, conversation_id) -> tuple[str, Path]:
+    self.current_conversation_id = conversation_id
+
+    fieldnames = [
+      "conversation_id",
+      "started",
+      "updated",
+      "conversation_title",
+      "conversation_history_md_file"
+    ]
+
+    with self.conversation_metadata.open(
+      "r",
+      newline="",
+      encoding="utf-8"
+    ) as csv_file:
+      reader = csv.DictReader(csv_file)
+      fieldnames=reader.fieldnames
+      rows = list(reader)
+
+    found = False
+    updated_time = datetime.now().isoformat(timespec="seconds")
+
+    for row in rows:
+      if row.get("conversation_id") == conversation_id:
+        row["updated"] = updated_time
+        found = True
+        break
+
+    if not found:
+      raise ValueError(
+        f"Conversation not found {conversation_id}"
+      )
+
+    with self.conversation_metadata.open(
+      "w",
+      newline="",
+      encoding="utf-8"
+    ) as csv_file:
+      writer = csv.DictWriter(
+        csv_file,
+        fieldnames=fieldnames
+      )
+      writer.writeheader()
+      writer.writerows(rows)
+  
