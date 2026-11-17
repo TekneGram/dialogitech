@@ -37,13 +37,7 @@ class FindPapersByTopic:
     self.find_papers_directory: Path = self.tracking_directory / "find_papers"
     self.ensure_conversation_metadata_file()
 
-    # Set up LLM and RAG
-    self.llm_worker = LLMWorker(
-      python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
-      runner_path=Path(__file__).resolve().parents[1] / "chunker" / "mlx_llm_runner.py",
-      model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
-      request_timeout_seconds=120.0
-    )
+    # Set up RAG
     self.lancedb = SearchLanceDB()
 
     # Use this to manage the conversation

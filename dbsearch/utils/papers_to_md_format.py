@@ -15,7 +15,8 @@ def papers_to_markdown_format(
     "",
     f"Topics searched: {', '.join(topics)}",
     "",
-    "| Rank | Paper title | Authors | Year | Journal | Paper type | | Markdown path | PDF Path | Count |",
+    "| Rank | Paper title | Authors | Year | Journal | Paper type | Markdown path | PDF path | Count |",
+    "| ---: | --- | --- | ---: | --- | --- | --- | --- | ---: |",
   ]
 
   for rank, (paper_id, paper) in enumerate(
@@ -27,17 +28,17 @@ def papers_to_markdown_format(
       for author in paper.get("authors", [])
     )
 
-    lines.append(
-      "| "
-      f"{rank} | "
-      f"{cell(paper.get('paper_title'))} | "
-      f"{cell(authors)} |"
-      f"{cell(paper.get('year'))} |"
-      f"{cell(paper.get('journal'))} | "
-      f"{cell(paper.get('paper_type'))} | "
-      f"{cell(paper.get('markdown_path'))} | "
-      f"{cell(paper.get('pdf_path'))} | "
-      f"{paper.get('count', 0)} |"
-    )
+    cells = [
+      str(rank),
+      cell(paper.get("paper_title")),
+      cell(authors),
+      cell(paper.get("year")),
+      cell(paper.get("journal")),
+      cell(paper.get("paper_type")),
+      cell(paper.get("markdown_path")),
+      cell(paper.get("pdf_path")),
+      str(paper.get("count", 0)),
+    ]
+    lines.append(f"| {' | '.join(cells)} |")
 
   return "\n".join(lines) + "\n"
