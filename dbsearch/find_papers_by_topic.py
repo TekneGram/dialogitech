@@ -87,10 +87,6 @@ class FindPapersByTopic:
     Get a list of topics / queries by the researcher
     Search for papers that match those topics
     """
-    if self.conversation_tracker.get_current_conversation_id() is None:
-      conversation_id, conversation_file = self.conversation_tracker.start_new_conversation()
-      print(f"You started a new conversation. \n ID: {conversation_id} \n FILE: {conversation_file}")
-
     
     for topic in topics:
       results = self.lancedb.basic_search(text_to_search=topic, limit=100)
@@ -129,7 +125,7 @@ class FindPapersByTopic:
         for index, value in enumerate(topics)
       )
       title = self.conversation_tracker.create_conversation_title(context=all_queries)
-      self.conversation_tracker.start_new_conversation(title)
+      conversation_id, conversation_file = self.conversation_tracker.start_new_conversation(title)
       print(f"You started a new conversation. \n ID: {conversation_id} \n FILE: {conversation_file}")
 
     # Save a new find_papers_list md file with metadata

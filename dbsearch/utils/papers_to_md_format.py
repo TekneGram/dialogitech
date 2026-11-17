@@ -1,5 +1,4 @@
 
-
 def papers_to_markdown_format(
     papers_by_id: dict[str, dict],
     topics: list[str]
@@ -9,13 +8,14 @@ def papers_to_markdown_format(
     text = "" if value is None else str(value)
     text = text.replace("|", r"\|")
     text = text.replace("\n", " ")
+    return text
 
   lines = [
     "# Paper search results",
     "",
     f"Topics searched: {', '.join(topics)}",
     "",
-    "| Rank | Paper title | Author | Year | Journal | Paper type | Count |",
+    "| Rank | Paper title | Authors | Year | Journal | Paper type | | Markdown path | PDF Path | Count |",
   ]
 
   for rank, (paper_id, paper) in enumerate(
@@ -35,6 +35,8 @@ def papers_to_markdown_format(
       f"{cell(paper.get('year'))} |"
       f"{cell(paper.get('journal'))} | "
       f"{cell(paper.get('paper_type'))} | "
+      f"{cell(paper.get('markdown_path'))} | "
+      f"{cell(paper.get('pdf_path'))} | "
       f"{paper.get('count', 0)} |"
     )
 
