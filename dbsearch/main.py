@@ -5,6 +5,7 @@ from .question_search_by_section import QuestionSearchBySection
 from .review_writer import ReviewWriter
 from .summarize_question_search import SummarizeQuestionSearch
 from .paper_summary import SummarizePaper
+from .find_papers_by_topic import FindPapersByTopic
 
 # Make a straightforward search
 def question_search(
@@ -54,6 +55,11 @@ def summarize_a_paper(paper_title: str) -> None:
   SummarizePaper().summarize_paper(paper_title)
 
 
+# List papers based on topics covered
+def find_papers_by_topics(topics: list[str]) -> None:
+  FindPapersByTopic().find_by_topics(topics)
+
+
 def main() -> None:
   parser = argparse.ArgumentParser(description="DialogiTech database search commands.")
   subparsers = parser.add_subparsers(dest="command", required=True)
@@ -82,6 +88,11 @@ def main() -> None:
   summarize_a_paper_parser = subparsers.add_parser(
     "summarize_a_paper",
     help="Read each section of a paper and summarize each section; return the path to the full summary file."
+  )
+
+  find_papers_by_topics_parser = subparsers.add_parser(
+    "find_papers_by_topics",
+    help="Search for papers where a list of topics has matches and investigate those papers."
   )
 
   # Create flags for question_search
@@ -185,6 +196,15 @@ def main() -> None:
     help="Supply the title of the paper you wish to summarize."
   )
 
+  # Create flags for find_papers_by_topics
+  find_papers_by_topics_parser.add_argument(
+    "--topics",
+    nargs="+",
+    type=str,
+    required=True,
+    help="a list of topics or ideas that you want searched for in papers"
+  )
+
   args = parser.parse_args()
   if args.command == "question_search":
     question_search(
@@ -213,6 +233,9 @@ def main() -> None:
 
   if args.command == "summarize_a_paper":
     summarize_a_paper(paper_title=args.paper_title)
+
+  if args.command == "find_papers_by_topics":
+    find_papers_by_topics(topics=args.topics)
 
 
 if __name__ == "__main__":
