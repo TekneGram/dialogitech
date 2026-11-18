@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime
 
 from .utils.papers_to_md_format import papers_to_markdown_format
+from .utils.paper_record import parse_paper_results, PaperRecord
+from .utils.paper_matching import find_best_paper_match
 
 @dataclass
 class Paper:
@@ -45,6 +47,12 @@ class FindPapersByTopic:
 
     # If this class is started with a conversation number, add the papers_by_id data from the relevant data source
     self.papers_by_id: dict[str, dict[str, Any]] = {}
+
+    # find_papers_ids - there may be multiple ids associated with a given conversation
+    # This is taken from the find_paper_metadata.csv which contains the find_papers_id
+    # The find_papers_id associated a query to find papers with the results of the papers found
+    # The results are stored in the md file listed under papers_list_md_file in the find_papers_metadata.csv
+    self.find_papers_ids: list[str] | None = None
 
   def ensure_conversation_metadata_file(self) -> None:
     """
@@ -168,12 +176,31 @@ class FindPapersByTopic:
     # Send papers_by_id to an md file and format it nicely.
     md_format = papers_to_markdown_format(papers_by_id=self.papers_by_id, topics=topics)
     papers_list_md_file.write_text(md_format, encoding="utf-8")
-
-
-    
-
     
     print(f"Done! Check the file {papers_list_md_file} for information about each file found.")
+
+  def set_find_papers_ids_by_conversation_id(self) -> None:
+    """
+    Returns the find_paper_id values from find_papers_metadata.csv file in conversation_tracking
+    """
+    conv_id = self.conversation_tracker.get_current_conversation_id()
+    self.find_papers_ids = []
+    with self.find_papers_metadata.open(
+      "r",
+      newline="",
+      encoding="utf-8",
+    ) as csv_file:
+      reader = csv.DictReader(
+        csv_file
+      )
+      self.find_papers_ids = [
+        row["find_papers_id"]
+        for row in reader
+        if row.get("conversation_id") == conv_id
+      ]
+
+  def get_find_papers_ids(self) -> list[str]:
+    return self.find_papers_ids
 
   def get_an_abstract(self, paper_title: str) -> None:
     """
@@ -216,3 +243,46 @@ class FindPapersByTopic:
     If there is only an md file and no json file, then use the headings to determine the section and slice by headings.
     If there are no headings in the md file, then slice every 1000 words and have the llm determine the section.
     """
+    # This function below uses the current conversation_id to set the find_papers_ids
+    # that are associated with that conversation_id
+    self.set_find_papers_ids_by_conversation_id()
+
+    # Get the md file for each of the find_papers_ids
+    papers: list[PaperRecord] = self.load_papers_for_find_ids()
+
+    # Now use the find_best_paper_match for the title provided by comparing them with the papers
+    best = find_best_paper_match(paper_title, papers)
+
+    # Get the specific paper's path
+    print(f"The paper matched from your provided title is titled: {best.paper.paper_title}, published in {best.paper.year} and the authors are {best.paper.authors}")
+    best_paper_md_path = best.paper.markdown_path
+
+    # Now run the queries on this specific paper
+    
+
+  def load_papers_for_find_ids(self) -> list[PaperRecord]:
+    requested_ids = set(self.find_papers_ids)
+    papers: list[PaperRecord] = []
+
+    with self.find_papers_metadata.open(
+      "r",
+      newline="",
+      encoding="utf-8", 
+    ) as csv_file:
+      reader = csv.DictReader(csv_file)
+
+      for row in reader:
+        if row.get("find_papers_id") not in requested_ids:
+          continue
+
+        markdown_path = row.get("papers_list_md_file")
+
+        if not markdown_path:
+          continue
+
+        papers.extend(parse_paper_results(markdown_path))
+
+    return papers
+
+
+

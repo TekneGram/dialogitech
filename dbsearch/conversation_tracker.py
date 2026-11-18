@@ -22,7 +22,7 @@ class ConversationTracker:
     # Set up the conversations context
     self.conv_titles_ids: dict[str, str] = {}
     self.current_conversation_id: str | None = conversation_id
-    self.conversation_titles = self.aggregate_conversation_titles()
+    self.aggregate_conversation_titles()
 
     # Set up LLM
     self.llm_worker = LLMWorker(
@@ -86,7 +86,7 @@ class ConversationTracker:
         self.conv_titles_ids[conversation_title] = conversation_id
 
   def get_conversation_titles(self) -> dict[str, str]:
-    return self.conversation_titles
+    return self.conv_titles_ids
 
       
   def get_conversation_history_path_by_title(self, conversation_title: str) -> Path | None:
