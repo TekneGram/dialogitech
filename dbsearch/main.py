@@ -7,6 +7,7 @@ from .summarize_question_search import SummarizeQuestionSearch
 from .paper_summary import SummarizePaper
 from .find_papers_by_topic import FindPapersByTopic
 from .conversation_tracker import ConversationTracker
+from .synthesize_summaries import SynthesizeSummaries
 
 # Make a straightforward search
 def question_search(
@@ -69,6 +70,13 @@ def query_a_paper(query: str, paper_title: str, conversation_id: str) -> None:
     paper_title=paper_title,
   )
 
+# Synthesize summaries
+def synthesize_summaries(user_request: str, conversation_id: str) -> None:
+  conversation = ConversationTracker(conversation_id)
+  SynthesizeSummaries(conversation_tracker=conversation).synthesize_summaries(
+    user_request=user_request
+  )
+
 def list_conversation_titles() -> None:
   titles = ConversationTracker().get_conversation_titles()
   for title, conversation_id in titles.items():
@@ -118,6 +126,11 @@ def main() -> None:
   query_a_paper_parser = subparsers.add_parser(
     "query_a_paper",
     help="Query a specific paper selected by title."
+  )
+
+  synthesize_summaries_parser = subparsers.add_parser(
+    "synthesize_summaries",
+    help="Synthesize a set of summaries associated with a particular conversation id."
   )
 
   list_conversation_titles_parser = subparsers.add_parser(
@@ -259,6 +272,19 @@ def main() -> None:
     help="Conversation ID containing the paper search results."
   )
 
+  # Create flags for synthesize_summaries
+  synthesize_summaries_parser.add_argument(
+    "--user-request",
+    required=True,
+    help="What the synthesis should focus on and how it should be synthesized."
+  )
+
+  synthesize_summaries_parser.add_argument(
+    "--conversation-id",
+    required=True,
+    help="Conversation containing the summaries to synthesize"
+  )
+
   see_conversation_history_parser.add_argument(
     "--conversation_id",
     type=str,
@@ -302,6 +328,12 @@ def main() -> None:
     query_a_paper(
       query=args.query,
       paper_title=args.paper_title,
+      conversation_id=args.conversation_id
+    )
+
+  if args.command == "synthesize_summaries":
+    synthesize_summaries(
+      user_request=args.user_request,
       conversation_id=args.conversation_id
     )
 

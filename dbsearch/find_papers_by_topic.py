@@ -206,22 +206,6 @@ class FindPapersByTopic:
     """A helper function"""
     return self.find_papers_ids
 
-  def get_an_abstract(self, paper_title: str) -> None:
-    """
-    Uses the paper title to find the file and return the abstract
-    We need to develop a function or class that can handle finding specific papers based on paper titles since
-    this is a recurring request.
-    """
-
-    # Get the markdown_path for the paper title
-      # If the paper title doesn't turn up a markdown path because e.g., the title is not an exact match, then use an edit distance formula to match all the 
-      # titles in the self.papers_by_id for the most likely paper title
-
-    # Search for the ..._classified_chunks.json file
-    # Inside the json file search for the Headings, Abstract and get content (This should be the whole abstract)
-    # If there is no json file or the Headings Abstract does not exist, search for the md file
-    # Inside the md file look for the heading #Abstract, and slice all the text from #Abstract up to the next title heading. Send to the llm and ask the llm to return only the abstract after checking it is the abstract
-    # If that doesn't exist, slice the top 1000 words from the md file, send it to the llm and ask the llm to return the abstract part only.
 
   def query_a_paper(self, query: str, paper_title: str) -> None:
     """
