@@ -24,13 +24,6 @@ class ConversationTracker:
     self.current_conversation_id: str | None = conversation_id
     self.aggregate_conversation_titles()
 
-    # Set up LLM
-    self.llm_worker = LLMWorker(
-      python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
-      runner_path=Path(__file__).resolve().parents[1] / "chunker" / "mlx_llm_runner.py",
-      model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
-      request_timeout_seconds=120.0
-    )
 
   def get_current_conversation_id(self) -> str | None:
     if self.current_conversation_id is not None:
@@ -229,6 +222,13 @@ class ConversationTracker:
       md_file.write(f"\n\n[{now}]\n{latest}")
 
   def create_conversation_title(self, context: str) -> str:
+    # Set up LLM
+    llm_worker = LLMWorker(
+      python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
+      runner_path=Path(__file__).resolve().parents[1] / "chunker" / "mlx_llm_runner.py",
+      model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
+      request_timeout_seconds=120.0
+    )
     system_prompt = f"You create a short title for a conversation, around five to ten words. Return only the title. Do not make extra comments."
 
     messages = [
@@ -245,7 +245,7 @@ class ConversationTracker:
       }
     )
 
-    title = self.llm_worker.generate(
+    title = llm_worker.generate(
       messages=messages,
       max_tokens=20,
       temperature=0.7

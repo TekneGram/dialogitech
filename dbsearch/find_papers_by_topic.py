@@ -8,6 +8,7 @@ from typing import Any
 import csv
 import uuid
 from datetime import datetime
+import json
 
 from .utils.papers_to_md_format import papers_to_markdown_format
 from .utils.paper_record import parse_paper_results, PaperRecord
@@ -37,6 +38,7 @@ class FindPapersByTopic:
         )
     self.find_papers_metadata: Path = self.tracking_directory / "find_papers_metadata.csv"
     self.find_papers_directory: Path = self.tracking_directory / "find_papers"
+    self.summaries_metadata: Path = self.tracking_directory / "summaries_metadata.csv"
     self.ensure_conversation_metadata_file()
 
     # Set up RAG
@@ -181,6 +183,7 @@ class FindPapersByTopic:
 
   def set_find_papers_ids_by_conversation_id(self) -> None:
     """
+    A helper function
     Returns the find_paper_id values from find_papers_metadata.csv file in conversation_tracking
     """
     conv_id = self.conversation_tracker.get_current_conversation_id()
@@ -200,6 +203,7 @@ class FindPapersByTopic:
       ]
 
   def get_find_papers_ids(self) -> list[str]:
+    """A helper function"""
     return self.find_papers_ids
 
   def get_an_abstract(self, paper_title: str) -> None:
@@ -222,26 +226,11 @@ class FindPapersByTopic:
   def query_a_paper(self, query: str, paper_title: str) -> None:
     """
     Use the paper title to query a paper.
-    The llm should look at each section in the paper and summarize it. After summarizing it, it should comment on
-    the relevance of that section of the paper to the query
-    Both of these should be parsed computationally into a json object as follows:
-    {
-      "query": "how does this section address trust in LLMs?"
-      "paper_info":  {self.papers_by_id.item}
-      "summaries": [
-        {
-          "section": "Method",
-          "summary": "...",
-          "comment": "...",
-          "relevance_to_query": "high/medium/low"
-        },
-        {
-          ...
-        }
-      ]
-    }
-    If there is only an md file and no json file, then use the headings to determine the section and slice by headings.
-    If there are no headings in the md file, then slice every 1000 words and have the llm determine the section.
+    The llm reads each section of the paper and determines the extent to which it contains an answer to the
+    user's query, returning a result "high", "medium", "low" and "none".
+    Any query with a relevance of "high", "medium" or "low" gets summarized by the llm.
+    The summarized metadata is saved to summaries_metadata.csv and the summary itself is saved
+    as an md file in the summaries folder.
     """
     # This function below uses the current conversation_id to set the find_papers_ids
     # that are associated with that conversation_id
@@ -257,10 +246,185 @@ class FindPapersByTopic:
     print(f"The paper matched from your provided title is titled: {best.paper.paper_title}, published in {best.paper.year} and the authors are {best.paper.authors}")
     best_paper_md_path = best.paper.markdown_path
 
-    # Now run the queries on this specific paper
+    # Check that the classified_chunks.json file exists.
+    if not best_paper_md_path:
+      raise FileNotFoundError(
+        f"No Markdown path found for {best.paper.paper_title!r}"
+      )
+
+    # Resolve relative paths from the repository root
+    repo_root = Path(__file__).resolve().parents[1]
+    markdown_path = Path(best_paper_md_path)
+    if not markdown_path.is_absolute():
+      markdown_path = repo_root / markdown_path
+
+    classified_json_name = (
+      markdown_path.name.removesuffix("_filtered.md")
+      + "_classified_chunks.json"
+    )
+
+    classified_json_path = markdown_path.with_name(classified_json_name)
+
+    summary_metadata_fieldnames = [
+      "summary_id",
+      "conversation_id",
+      "content_path",
+      "paper_title",
+      "query",
+      "section_summarized",
+      "relevance",
+      "summary_md"
+    ]
+
+    llm = LLMWorker(
+      python_executable="/Users/danielmikaleola/.unsloth/unsloth_gemma4_mlx/bin/python",
+      runner_path=Path(__file__).resolve().parents[1] / "chunker" / "mlx_llm_runner.py",
+      model_path="unsloth/gemma-4-E4B-it-UD-MLX-4bit",
+      request_timeout_seconds=120.0
+    )
+
+    system_prompt = (
+      "You read a section from an academic paper. "
+      "How well does the section answers the user's query? "
+      "Judge how well the section answers the user's query with 'well', 'reasonable', 'irrelevant' "
+      "Output only those labels. Do not output any other comments."
+      )
+
+    user_prompt = "Here is a section of the academic paper: \n"
+
+    if classified_json_path.exists():
+      classified_payload = json.loads(
+        classified_json_path.read_text(encoding="utf-8")
+      )
+      headings = classified_payload.get("headings", [])
+
+      # Create markdown file for summaries
+      now = datetime.now().isoformat(timespec="seconds")
+      summaries_directory = (
+        Path(__file__).resolve().parents[1] / "data" / "conversation_tracking" / "summaries"
+      )  
+      summaries_directory.mkdir(parents=True, exist_ok=True)
+      summary_path = (
+        summaries_directory / f"{now}_{best.paper.paper_title}.md"
+      )
+      summary_markdown = (
+        f"# Summaries of sections relevant to the query: {query} \n"
+        f"**Paper:** {best.paper.paper_title}\n"
+        f"**Authors:** {', '.join(best.paper.authors)}\n"
+        f"**Year:** {best.paper.year}\n"
+      )
+
+      summary_path.write_text(
+        summary_markdown,
+        encoding="utf-8"
+      )
+
+
+      for heading in headings:
+        section_title = heading.get("title")
+        content = heading.get("content")
+        updated_user_prompt = user_prompt + content + "\n\n" + f"The user's question about the paper is: {query}. Does the section answer the user's query?"
+        messages = [
+          {
+            "role": "system",
+            "content": system_prompt
+          },
+          {
+            "role": "user",
+            "content": updated_user_prompt
+          }
+        ]
+        relevance = llm.generate(
+          messages=messages,
+          max_tokens=8,
+          temperature=0.0
+        )
+
+        if relevance.strip().lower() in {"well", "reasonable"}:
+          system_prompt_summarize = (
+            "You summarize a section from an academic paper. "
+            "Your summary should be focused on answering the user's query using only the information in the section."
+            "However, do not comment on the relevance of the section to the user's query."
+            "You write in an academic style."
+            "When summarizing any information containing a citation, write 'as cited by...'."
+          )
+
+          authors = ", ".join(best.paper.authors)
+          user_prompt_summarize = (
+            "Here is the section of the text: \n"
+            f"{content} \n\n"
+            f"The user's query about the text is: {query} \n"
+            f"Write the summary to in response to the query. \n"
+            f"The authors of the paper are: {authors}.\n"
+            f"The publication year was: {best.paper.year}"
+          )
+          messages_summarize = [
+            {
+              "role": "system",
+              "content": system_prompt_summarize
+            },
+            {
+              "role": "user",
+              "content": user_prompt_summarize
+            }
+          ]
+          summary = llm.generate(
+            messages=messages_summarize,
+            max_tokens=512,
+            temperature=0.7
+          )
+
+          # Now save this summary information into the summaries_metadata.csv
+          # And save the summary to a specific md file
+          summary_id = uuid.uuid4().hex
+          file_is_empty = (
+            not self.summaries_metadata.exists()
+            or self.summaries_metadata.stat().st_size == 0
+          )
+          with self.summaries_metadata.open(
+            "a",
+            newline="",
+            encoding="utf-8"
+          ) as csv_file:
+            writer = csv.DictWriter(
+              csv_file,
+              fieldnames=summary_metadata_fieldnames
+            )
+            if file_is_empty:
+              writer.writeheader()
+            writer.writerow(
+              {
+                "summary_id": summary_id,
+                "conversation_id": self.conversation_tracker.get_current_conversation_id(),
+                "content_path": str(classified_json_path),
+                "paper_title": best.paper.paper_title,
+                "query": query,
+                "section_summarized": section_title,
+                "relevance": relevance.strip().lower(),
+                "summary_md": f"{now}_{best.paper.paper_title}.md"
+              }
+            )
+          # Append to the paper's summary
+          with summary_path.open(
+            "a",
+            encoding="utf-8"
+          ) as summary_file:
+            summary_file.write(
+              f"\n## {section_title}\n\n"
+              f"{summary.strip()}\n"
+            )
+          
+          
+
+
+    else:
+      classified_payload = None
+      # Use md file and slice and summarize every 1000
+
     
 
   def load_papers_for_find_ids(self) -> list[PaperRecord]:
+    """A helper function"""
     requested_ids = set(self.find_papers_ids)
     papers: list[PaperRecord] = []
 
