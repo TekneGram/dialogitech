@@ -259,6 +259,48 @@ class FindPapersByTopic:
     """A helper function"""
     return self.find_papers_ids
 
+  def view_abstract(self, paper_title:str) -> None:
+    """
+    Return the abstract of a paper based on the paper's title
+    """
+    self.set_find_papers_ids_by_conversation_id()
+    papers: list[PaperRecord] = self.load_papers_for_find_ids()
+    best = find_best_paper_match(paper_title, papers)
+    print(f"The paper matched from the provided title is titled {best.paper.paper_title}, published in {best.paper.year} and the authors are {best.paper.authors}")
+    best_paper_md_path = best.paper.markdown_path
+    if not best_paper_md_path:
+      raise FileNotFoundError(
+        f"No Markdown path found for {best.paper.paper_title!r}"
+      )
+    repo_root = Path(__file__).resolve().parents[1]
+    markdown_path = Path(best_paper_md_path)
+    if not markdown_path.is_absolute():
+      markdown_path = repo_root / markdown_path
+
+    classified_json_name = (
+      markdown_path.name.removesuffix("_filtered.md")
+      + "_classified_chunks.json"
+    )
+    classified_json_path = markdown_path.with_name(classified_json_name)
+    if classified_json_path.exists():
+      classified_payload = json.loads(
+        classified_json_path.read_text(encoding="utf-8")
+      )
+
+      abstract_content = []
+      headings = classified_payload.get("headings", [])
+
+      for heading in headings:
+        for chunk in heading.get("chunks", []):
+          classification = chunk.get("classification", {})
+          if classification.get("label") == "abstract":
+            abstract_content.append(heading.get("content", ""))
+            break
+
+      print(" ".join(abstract_content))
+
+    
+
 
   def query_a_paper(self, query: str, paper_title: str) -> None:
     """

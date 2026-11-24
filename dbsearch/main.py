@@ -62,6 +62,11 @@ def find_papers_by_topics(topics: list[str], section_labels: list[str] | None = 
   conversation = ConversationTracker(conversation_id) # Create a tracker
   FindPapersByTopic(conversation).find_by_topics(topics=topics, section_labels=section_labels)
 
+# Read an abstract
+def view_abstract(paper_title: str, conversation_id: str) -> None:
+  conversation = ConversationTracker(conversation_id)
+  FindPapersByTopic(conversation).view_abstract(paper_title=paper_title)
+
 # Query a specific paper that was found using the conversation_id in find_papers_by_topics
 def query_a_paper(query: str, paper_title: str, conversation_id: str) -> None:
   conversation = ConversationTracker(conversation_id)
@@ -121,6 +126,11 @@ def main() -> None:
   find_papers_by_topics_parser = subparsers.add_parser(
     "find_papers_by_topics",
     help="Search for papers where a list of topics has matches and investigate those papers."
+  )
+
+  view_abstract_parser = subparsers.add_parser(
+    "view_abstract",
+    help="Read the abstract for a given paper title."
   )
 
   query_a_paper_parser = subparsers.add_parser(
@@ -261,6 +271,21 @@ def main() -> None:
     help="a list of sections to search on"
   )
 
+  # Create flags to view an abstract
+  view_abstract_parser.add_argument(
+    "--paper-title",
+    type=str,
+    required=True,
+    help="the title of the paper for which you wish to read the abstract"
+  )
+
+  view_abstract_parser.add_argument(
+    "--conversation-id",
+    type=str,
+    required=True,
+    help="The conversation id of the current conversation."
+  )
+
   # Create flags for query_a_paper
   query_a_paper_parser.add_argument(
     "--query",
@@ -329,8 +354,13 @@ def main() -> None:
   if args.command == "summarize_a_paper":
     summarize_a_paper(paper_title=args.paper_title)
 
+
+
   if args.command == "find_papers_by_topics":
     find_papers_by_topics(topics=args.topics, section_labels=args.section_labels)
+
+  if args.command == "view_abstract":
+    view_abstract(paper_title=args.paper_title, conversation_id=args.conversation_id)
 
   if args.command == "query_a_paper":
     query_a_paper(
