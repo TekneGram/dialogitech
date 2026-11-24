@@ -2,9 +2,12 @@ from .llm_services.llm_worker import LLMWorker
 from .search_services.search import SearchLanceDB
 from .conversation_tracker import ConversationTracker
 
+from chunker.llm_section_type_classifier_helpers.section_taxonomy import SectionLabel
+from collections.abc import Collection
+
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast, get_args
 import csv
 import uuid
 from datetime import datetime
@@ -31,6 +34,8 @@ class FindPapersByTopic:
       self,
       conversation_tracker: ConversationTracker
   ) -> None:
+
+    self.allowed_section_labels = set(get_args(SectionLabel))
 
     # Set up directories and files in the class
     self.tracking_directory = (
@@ -86,40 +91,74 @@ class FindPapersByTopic:
         )
         writer.writeheader()
 
-  def find_by_topics(self, topics: list[str]) -> None:
+  def find_by_topics(self, topics: list[str], section_labels: list[str] | None = None) -> None:
     """
     Get a list of topics / queries by the researcher
     Search for papers that match those topics
     """
-    
+    if section_labels is None:
+      section_labels: Collection[SectionLabel] = ["abstract", "introduction"]
+    else:
+      section_labels: Collection[SectionLabel] = self.validate_section_labels(section_labels)
+
+    min_similarity_for_filtering = 0.30 #This is a similarity threshold, aiming to reduce spurious results
+    all_papers: dict[str, list[dict[str, Any]]] = {}
+
     for topic in topics:
-      results = self.lancedb.basic_search(text_to_search=topic, limit=100)
+      results = self.lancedb.search_by_section(text_to_search=topic, sections=section_labels, limit=500)
 
       for row in results:
+        similarity = 1 - float(row["_distance"])
+        if similarity < min_similarity_for_filtering:
+          continue
+
         paper_id = row["paper_id"]
 
-        if paper_id not in self.papers_by_id:
-          self.papers_by_id[paper_id] = {
-            "paper_title": row.get("paper_title"),
-            "authors": row.get("authors", []),
-            "year": row.get("year"),
-            "journal": row.get("journal"),
-            "paper_type": row.get("paper_type"),
-            "markdown_path": row.get("markdown_path"),
-            "pdf_path": row.get("pdf_path"),
-            "count": 0
-          }
+        hit = {
+          **row,
+          "topic": topic,
+          "count": similarity
+        }
 
-        self.papers_by_id[paper_id]["count"] += 1
+        all_papers.setdefault(paper_id, []).append(hit)
 
-    # Sort in descending order
-    self.papers_by_id = dict(
-      sorted(
-        self.papers_by_id.items(),
-        key=lambda item: item[1].get("count", 0),
-        reverse = True
+    # Sort every paper's hits by similarity
+    for paper_id, hits in all_papers.items():
+      hits.sort(
+        key=lambda hit: hit["count"],
+        reverse=True,
       )
+
+    ranked_papers = sorted(
+      all_papers.items(),
+      key=lambda item: sum(
+        hit["count"]
+        for hit in item[1][:3]
+      ),
+      reverse=True,
     )
+
+    for paper_id, hits in ranked_papers:
+      if not hits:
+        continue
+
+      top_three_scores = [
+        hit["count"]
+        for hit in hits[:3]
+      ]
+
+      top_three_similarity_sum = sum(top_three_scores)
+      best_hit = hits[0]
+      self.papers_by_id[paper_id] = {
+        "paper_title": best_hit.get("paper_title"),
+        "authors": best_hit.get("authors", []),
+        "year": best_hit.get("year"),
+        "journal": best_hit.get("journal"),
+        "paper_type": best_hit.get("paper_type"),
+        "markdown_path": best_hit.get("markdown_path"),
+        "pdf_path": best_hit.get("pdf_path"),
+        "count": top_three_similarity_sum
+      }
 
     # Manage the conversation up to now
     if self.conversation_tracker.get_current_conversation_id() is None:
@@ -180,6 +219,20 @@ class FindPapersByTopic:
     papers_list_md_file.write_text(md_format, encoding="utf-8")
     
     print(f"Done! Check the file {papers_list_md_file} for information about each file found.")
+
+  def validate_section_labels(self, section_labels:list[str]) -> Collection[SectionLabel]:
+    if not section_labels:
+      raise ValueError("section_labels cannot be empty.")
+
+    invalid = set(section_labels) - self.allowed_section_labels
+    if invalid:
+      raise ValueError(
+        f"Invalid section labels: {sorted(invalid)}. "
+        f"Allowed labels: {sorted(self.allowed_section_labels)}"
+      )
+
+    normalized = list(dict.fromkeys(section_labels))
+    return cast(Collection[SectionLabel], normalized)
 
   def set_find_papers_ids_by_conversation_id(self) -> None:
     """

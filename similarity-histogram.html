@@ -1,0 +1,66 @@
+<div id="similarity-histogram" role="img" aria-label="Histogram of 500 cosine similarity scores from 0.169 to 0.443 for the section-filtered topic search.">
+  <h2>Similarity scores for 500 retrieved chunks</h2>
+  <svg id="similarity-histogram-svg" viewBox="0 0 760 390" width="100%" height="390" aria-hidden="true"></svg>
+  <p id="similarity-histogram-fallback" class="sr-only">Scores range from 0.169 to 0.443. Most results fall between 0.169 and 0.265.</p>
+</div>
+<script>
+(() => {
+  const root = document.getElementById("similarity-histogram");
+  const svg = document.getElementById("similarity-histogram-svg");
+  if (!root || !svg) return;
+
+  const counts = [80, 78, 54, 55, 49, 43, 35, 13, 14, 15, 16, 15, 11, 9, 4, 2, 3, 3, 0, 1];
+  const min = 0.1689435839653015;
+  const max = 0.4429052472114563;
+  const width = 0.01369808316230774;
+  const plot = { left: 62, top: 22, right: 730, bottom: 328 };
+  const plotWidth = plot.right - plot.left;
+  const plotHeight = plot.bottom - plot.top;
+  const maxCount = Math.max(...counts);
+  const barWidth = plotWidth / counts.length;
+  const ns = "http://www.w3.org/2000/svg";
+
+  const add = (name, attrs, parent = svg) => {
+    const el = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+    parent.appendChild(el);
+    return el;
+  };
+
+  add("line", { x1: plot.left, y1: plot.bottom, x2: plot.right, y2: plot.bottom, stroke: "currentColor", "stroke-width": 1 });
+  add("line", { x1: plot.left, y1: plot.top, x2: plot.left, y2: plot.bottom, stroke: "currentColor", "stroke-width": 1 });
+
+  [0, 20, 40, 60, 80].forEach((value) => {
+    const y = plot.bottom - (value / maxCount) * plotHeight;
+    add("line", { x1: plot.left, y1: y, x2: plot.right, y2: y, stroke: "currentColor", "stroke-opacity": 0.16, "stroke-width": 1 });
+    const label = add("text", { x: plot.left - 10, y: y + 4, "text-anchor": "end", "font-size": 12, fill: "currentColor" });
+    label.textContent = value;
+  });
+
+  counts.forEach((count, index) => {
+    const barHeight = (count / maxCount) * plotHeight;
+    const x = plot.left + index * barWidth + 1;
+    const y = plot.bottom - barHeight;
+    const rect = add("rect", {
+      x, y, width: Math.max(1, barWidth - 2), height: barHeight,
+      fill: "var(--viz-series-1, currentColor)",
+      opacity: 0.84,
+      "aria-label": `${count} chunks from ${(min + index * width).toFixed(3)} to ${(min + (index + 1) * width).toFixed(3)}`
+    });
+    const title = document.createElementNS(ns, "title");
+    title.textContent = `${count} chunks: ${(min + index * width).toFixed(3)}–${(min + (index + 1) * width).toFixed(3)}`;
+    rect.appendChild(title);
+  });
+
+  [min, min + (max - min) / 2, max].forEach((value) => {
+    const x = plot.left + ((value - min) / (max - min)) * plotWidth;
+    const label = add("text", { x, y: plot.bottom + 25, "text-anchor": "middle", "font-size": 12, fill: "currentColor" });
+    label.textContent = value.toFixed(3);
+  });
+
+  const xLabel = add("text", { x: (plot.left + plot.right) / 2, y: 378, "text-anchor": "middle", "font-size": 13, fill: "currentColor" });
+  xLabel.textContent = "Cosine similarity (1 − distance)";
+  const yLabel = add("text", { x: 14, y: (plot.top + plot.bottom) / 2, transform: `rotate(-90 14 ${(plot.top + plot.bottom) / 2})`, "text-anchor": "middle", "font-size": 13, fill: "currentColor" });
+  yLabel.textContent = "Chunks";
+})();
+</script>

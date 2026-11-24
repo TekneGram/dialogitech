@@ -58,9 +58,9 @@ def summarize_a_paper(paper_title: str) -> None:
 
 ##################
 # List papers based on topics covered
-def find_papers_by_topics(topics: list[str], conversation_id: str | None = None) -> None:
+def find_papers_by_topics(topics: list[str], section_labels: list[str] | None = None, conversation_id: str | None = None) -> None:
   conversation = ConversationTracker(conversation_id) # Create a tracker
-  FindPapersByTopic(conversation).find_by_topics(topics)
+  FindPapersByTopic(conversation).find_by_topics(topics=topics, section_labels=section_labels)
 
 # Query a specific paper that was found using the conversation_id in find_papers_by_topics
 def query_a_paper(query: str, paper_title: str, conversation_id: str) -> None:
@@ -253,6 +253,14 @@ def main() -> None:
     help="a list of topics or ideas that you want searched for in papers"
   )
 
+  find_papers_by_topics_parser.add_argument(
+    "--section-labels",
+    nargs="+",
+    type=str,
+    required=False,
+    help="a list of sections to search on"
+  )
+
   # Create flags for query_a_paper
   query_a_paper_parser.add_argument(
     "--query",
@@ -322,7 +330,7 @@ def main() -> None:
     summarize_a_paper(paper_title=args.paper_title)
 
   if args.command == "find_papers_by_topics":
-    find_papers_by_topics(topics=args.topics)
+    find_papers_by_topics(topics=args.topics, section_labels=args.section_labels)
 
   if args.command == "query_a_paper":
     query_a_paper(

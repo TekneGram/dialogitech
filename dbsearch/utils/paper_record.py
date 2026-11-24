@@ -13,7 +13,7 @@ class PaperRecord:
   paper_type: str | None
   markdown_path: str | None
   pdf_path: str | None
-  count: int
+  count: float
 
 
 def split_markdown_row(line: str) -> list[str]:
@@ -125,7 +125,7 @@ def parse_paper_results(path: str | Path) -> list[PaperRecord]:
         paper_type=cells[5] or None,
         markdown_path=cells[6] or None,
         pdf_path=cells[7] or None,
-        count=int(cells[8]),
+        count=float(cells[8]),
       )
     )
 

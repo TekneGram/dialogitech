@@ -24,6 +24,7 @@ class SearchLanceDB:
         query_type="vector",
         vector_column_name="embedding",
       )
+      .distance_type("cosine")
       .limit(limit)
       .to_list()
     )
@@ -55,7 +56,7 @@ class SearchLanceDB:
         prefilter=True
       )
 
-    return query.limit(limit).to_list()
+    return query.distance_type("cosine").limit(limit).to_list()
 
 
   ### SEARCH BY SECTION ###
@@ -115,5 +116,5 @@ class SearchLanceDB:
         query_vector,
         query_type="vector",
         vector_column_name="embedding"
-      ).where(combined_filter, prefilter=True).limit(limit).to_list()
+      ).where(combined_filter, prefilter=True).distance_type("cosine").limit(limit).to_list()
     )

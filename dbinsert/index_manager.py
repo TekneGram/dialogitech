@@ -10,7 +10,11 @@ class LanceIndexManager:
     def ensure_vector_index(self) -> None:
         table = self.store.table
         try:
-            table.create_index(vector_column_name="embedding", replace=False)
+            table.create_index(
+                metric="cosine",
+                vector_column_name="embedding",
+                replace=False,
+            )
         except RuntimeError as exc:
             if self._is_existing_index_error(exc) or "Not enough rows to train PQ" in str(exc):
                 return
